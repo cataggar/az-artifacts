@@ -238,9 +238,7 @@ with UniversalPackageClient(
     "https://dev.azure.com/org",
     credential=os.environ["AZURE_DEVOPS_EXT_PAT"],
 ) as client:
-    metadata = client.get_package_metadata(
-        feed="feed", name="package", version="1.2.3-rc.1"
-    )
+    metadata = client.get_package_metadata(feed="feed", name="package", version="1.2.3-rc.1")
     versions = client.get_package_versions_metadata(feed="feed", name="package")
 
 print(metadata.version, metadata.description, metadata.package_size)
