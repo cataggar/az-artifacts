@@ -35,6 +35,10 @@ class AzureService:
         self.expire = set()
         self.missing_urls = set()
         self.version = "1.2.3"
+        self.metadata_intent = "Download"
+        self.versions_metadata = {"count": 1, "value": [{"version": self.version}]}
+        self.versions_metadata_headers = {}
+        self.versions_metadata_status = 200
         self.package_pages = [[{"id": PACKAGE_ID, "name": "package"}]]
         self.versions = ["1.2.3"]
         self.services = [
@@ -92,8 +96,21 @@ class AzureService:
         if path.endswith("/_apis/ResourceAreas"):
             return httpx.Response(200, json={"value": self.services})
         if host == "pkgs.dev.azure.com" and "/_packaging/" in path:
-            assert request.url.params["intent"] == "Download"
-            return httpx.Response(200, json=self.metadata)
+            assert request.method == "GET"
+            assert request.headers["accept"] == "application/json; api-version=7.1-preview.1"
+            if path.endswith("/versions"):
+                assert not request.url.params
+                return httpx.Response(
+                    self.versions_metadata_status,
+                    json=self.versions_metadata,
+                    headers=self.versions_metadata_headers,
+                )
+            if "/upack/packages/" in path and path.rsplit("/", 2)[-2] == "versions":
+                expected = (
+                    {"intent": self.metadata_intent} if self.metadata_intent is not None else {}
+                )
+                assert request.url.params == httpx.QueryParams(expected)
+                return httpx.Response(200, json=self.metadata)
         if path.endswith("/_apis/dedup/urls"):
             assert request.method == "POST"
             assert request.url.params["allowEdge"] == "true"

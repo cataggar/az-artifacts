@@ -1,9 +1,9 @@
 # az-artifacts
 
-Native Python **downloads** for Azure DevOps Universal Packages, without
-ArtifactTool or an Azure CLI runtime dependency.
+Native Python **downloads and read-only metadata** for Azure DevOps Universal
+Packages, without ArtifactTool or an Azure CLI runtime dependency.
 
-**Status: early, download-only implementation (0.1.0), starting issue #1.**
+**Status: early, experimental implementation (0.1.0).**
 This implements a private transfer protocol using the Rust implementation as
 reference. Mock-based tests are not proof of service compatibility: **live Azure
 DevOps interoperability has not yet been verified**. Treat this as experimental,
@@ -124,7 +124,7 @@ automatically.
 Use the client as a context manager, or call `close()` when finished.
 The public `discover_services()` method returns the discovered service
 name-to-URL mapping and caches the resource-area lookup for the client's
-lifetime. Downloads perform this discovery automatically.
+lifetime. Downloads and metadata methods perform this discovery automatically.
 
 | Client argument | Default / meaning |
 | --- | --- |
@@ -187,6 +187,7 @@ case-sensitive and includes dotfiles. A supplied filter matching no files raises
 | `metadata.manifest_id` | Package manifest identifier. |
 | `metadata.super_root_id` | Package super-root identifier. |
 | `metadata.package_size` | Advertised whole-package size, before filtering. |
+| `metadata.description` | Optional package description; missing/null is `None`, and an empty string is preserved. |
 | `path` | Resolved destination `pathlib.Path`. |
 | `files` | Tuple of relative `pathlib.Path` objects for downloaded files; combine with `result.path` to locate them. |
 | `bytes_downloaded` | Logical file bytes written for the selected files, **not** network bytes, compressed transfer size, or bytes spent on metadata/retries. |
@@ -220,6 +221,70 @@ Library errors derive from `ArtifactsError`, including `AuthenticationError`,
 `NoMatchingFilesError`, `TransportError`, `ProtocolError`, `IntegrityError`, and
 `UnsafePathError`. Invalid arguments can raise `ValueError`/`TypeError`, and local
 filesystem failures can raise ordinary `OSError` subclasses.
+
+## Read package metadata
+
+The metadata methods use the same explicit credentials and cached service
+discovery as downloads, but do not retrieve manifests/blobs, write files, or
+require an advertised Dedup service. All arguments are keyword-only. `feed`,
+`name`, `scope`, and `project` follow the same rules as `download()`.
+
+```python
+import os
+
+from az_artifacts import UniversalPackageClient
+
+with UniversalPackageClient(
+    "https://dev.azure.com/org",
+    credential=os.environ["AZURE_DEVOPS_EXT_PAT"],
+) as client:
+    metadata = client.get_package_metadata(
+        feed="feed", name="package", version="1.2.3-rc.1"
+    )
+    versions = client.get_package_versions_metadata(feed="feed", name="package")
+
+print(metadata.version, metadata.description, metadata.package_size)
+print(versions.count)  # Server count, not a computed length or pagination total.
+for entry in versions.value:
+    print(entry.version, entry.description)
+```
+
+`get_package_metadata()` returns the same frozen `PackageMetadata` used in
+`DownloadResult.metadata`: version, manifest ID, super-root ID, whole-package size
+in bytes, and optional description. It requires an **exact version**, including
+prereleases; wildcards are only supported by `download()`. Its optional `intent`
+argument defaults to `None` (no query key) and otherwise sends the supplied
+nonempty string unchanged. Downloads continue to send `intent="Download"`.
+A response identifying a different version raises `ProtocolError`.
+
+`get_package_versions_metadata()` returns a frozen
+`LimitedPackageMetadataListResponse` with the unmodified server `count` and an
+immutable `value` tuple of `LimitedPackageMetadata(version, description)` entries.
+Service order and prereleases are preserved. This is limited UPack metadata, not
+the richer generic package-version catalog. Count is not assumed to equal tuple
+length or prove completeness; explicit unsupported continuation or partial-response
+signals raise `ProtocolError`. Both methods propagate service/protocol failures,
+including 404s, rather than treating them as an empty result.
+
+Descriptions preserve empty strings; missing/null descriptions are `None`.
+The exported frozen `PackagePushMetadata(manifest_id, super_root_id, proof_nodes,
+description=None)` and `PackageVersionDeletionState(name, version,
+deleted_date=None)` are **models only**, not publishing/deletion APIs.
+Proof nodes are an immutable tuple of opaque strings; deletion dates are optional
+timezone-aware UTC datetimes. There is no `add_package()` or deletion method.
+
+### Experimental metadata routing
+
+The pinned Python SDK uses location `4cdb2ced-0758-4651-8032-010f070dd7e5` and API
+`7.1-preview.1` for [both metadata GETs](https://github.com/microsoft/azure-devops-python-api/blob/86c9a559fc4ab309df21e674b236a542f9e77f89/azure-devops/azure/devops/v7_1/upack_packaging/upack_packaging_client.py#L53-L101).
+Its [route substitution](https://github.com/microsoft/azure-devops-python-api/blob/86c9a559fc4ab309df21e674b236a542f9e77f89/azure-devops/azure/devops/client.py#L117-L157)
+removes omitted placeholder segments, but retains literal segments. Based on
+that shared location and this library's existing exact-version route, the new
+versionless GET uses
+`/{project?}/_packaging/{feed}/upack/packages/{name}/versions`, without a final
+version segment. This is an **inferred route**, not a live-discovered/verified
+route template. No alternative endpoint is tried on failure. Live Azure DevOps
+compatibility, including collection completeness, remains unverified.
 
 ## Azure CLI comparison and unsupported behavior
 
