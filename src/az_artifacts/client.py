@@ -1,27 +1,31 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-"""Universal Package discovery, download, and read-only metadata client."""
+"""Universal Package discovery, inspection, download, and metadata client."""
 
 import math
 from collections.abc import Iterator, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import TracebackType
 from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 
-from . import _catalog, _json
+from . import _catalog, _json, _manifest
+from ._dedup import BlobReader
 from ._download import Downloader
 from ._http import Http, endpoint, validate_url
+from ._paths import filter_files, package_path, validate_file_filter
 from ._versions import resolve_version, validate_name, version_pattern
 from .auth import BearerToken, Credential, _validate_token
 from .errors import PackageNotFoundError, ProtocolError
 from .models import (
     DownloadResult,
     Feed,
+    FileVersion,
     LimitedPackageMetadataListResponse,
     Package,
+    PackageFile,
     PackageMetadata,
     PackageVersion,
     Scope,
@@ -70,7 +74,7 @@ def _organization_url(organization: str) -> tuple[str, str]:
 
 
 class UniversalPackageClient:
-    """Discover, read metadata, and download packages without Azure CLI or ArtifactTool.
+    """Discover, inspect, and download packages without Azure CLI or ArtifactTool.
 
     Pass a PAT string, a :class:`BearerToken`, or an Azure ``TokenCredential``.
     Use a context manager or call :meth:`close` to release HTTP connections.
@@ -180,6 +184,12 @@ class UniversalPackageClient:
             or services.get("feed")
             or endpoint("https://feeds.dev.azure.com", self._organization_name)
         )
+
+    def _blob_url(self) -> str:
+        blob_url = self.discover_services().get("dedup")
+        if blob_url is None:
+            raise ProtocolError("ResourceAreas did not advertise a dedup service")
+        return blob_url
 
     def list_feeds(self, *, project: str | None = None) -> tuple[Feed, ...]:
         """List all accessible organization feeds, optionally filtered by project.
@@ -393,6 +403,140 @@ class UniversalPackageClient:
             raise ProtocolError("Limited package metadata returned a partial or continued response")
         return _json.limited_package_metadata_list_response(response.json())
 
+    def _package_files(
+        self, feed: str, name: str, version: str, project: str | None
+    ) -> tuple[PackageFile, ...]:
+        reader = BlobReader(self._http, self._blob_url())
+        metadata = self._get_package_metadata(feed, name, version, project, intent=None)
+        return _manifest.load(reader, metadata, max_bytes=self._max_manifest_bytes)
+
+    def _find_file(
+        self,
+        feed: str,
+        name: str,
+        version: str,
+        project: str | None,
+        path: PurePosixPath,
+    ) -> PackageFile | None:
+        files = self._package_files(feed, name, version, project)
+        return next((file for file in files if file.path == path), None)
+
+    def list_files(
+        self,
+        *,
+        feed: str,
+        name: str,
+        version: str,
+        file_filter: str | Sequence[str] | None = None,
+        scope: Scope = "organization",
+        project: str | None = None,
+    ) -> tuple[PackageFile, ...]:
+        """Read exact-version manifest files in order, without payloads or local I/O.
+
+        ``feed``, ``name``, ``scope`` and ``project`` follow download(); ``version``
+        must be exact, including prereleases. ``file_filter`` uses download's
+        ordered POSIX globs, but no matches returns (). All inputs are validated
+        before requests. Requires an open client and an advertised Dedup service.
+        Paths are case-sensitive even on Windows; host-only destination
+        restrictions do not apply. Metadata/manifest/blob failures propagate.
+        """
+        self._validate_package(feed, name)
+        _validate_scope(scope, project)
+        if version_pattern(version) is not None:
+            raise ValueError("Inspection requires an exact Universal Package version")
+        patterns = validate_file_filter(file_filter)
+        return filter_files(self._package_files(feed, name, version, project), patterns)
+
+    def file_exists(
+        self,
+        *,
+        feed: str,
+        name: str,
+        version: str,
+        relative_path: str | PurePosixPath,
+        scope: Scope = "organization",
+        project: str | None = None,
+    ) -> bool:
+        """Check an exact, case-sensitive logical path without payloads or local I/O.
+
+        Common arguments follow list_files(). ``relative_path`` is a nonempty
+        package-relative POSIX string or PurePosixPath, never a local Path.
+        No leading slash, drive prefix, backslash, control, empty, dot or parent
+        component is accepted; PurePosixPath's already-normalized value is used.
+        False means catalog-established package/version absence or a missing
+        manifest path. No negative caching; absence does not permit publishing.
+        HTTP 404 (including metadata after catalog success), authentication,
+        transport and malformed-response errors always propagate.
+        """
+        self._validate_package(feed, name)
+        _validate_scope(scope, project)
+        if version_pattern(version) is not None:
+            raise ValueError("Inspection requires an exact Universal Package version")
+        path = package_path(relative_path)
+        if not self.package_version_exists(
+            feed=feed, name=name, version=version, scope=scope, project=project
+        ):
+            return False
+        return self._find_file(feed, name, version, project, path) is not None
+
+    def list_file_versions(
+        self,
+        *,
+        feed: str,
+        name: str,
+        relative_path: str | PurePosixPath,
+        versions: Sequence[str] | None = None,
+        scope: Scope = "organization",
+        project: str | None = None,
+    ) -> Iterator[FileVersion]:
+        """Lazily scan one package's versions for a path; never fetch file payloads.
+
+        Common arguments and path rules follow file_exists(). None enumerates
+        visible nondeleted catalog versions, including prereleases, in service
+        order; an absent package raises PackageNotFoundError. An explicit
+        sequence is copied/validated eagerly and scanned in caller order; empty
+        means no requests. Wildcards and a bare version string are not accepted.
+        Explicit missing versions and versions disappearing mid-scan raise their
+        metadata errors, never silently skip an HTTP 404.
+
+        Network work starts on iteration; advancing requires an open client.
+        Only path-present records are yielded, without change detection or
+        sorting. Holds the bounded version catalog/explicit sequence and one
+        bounded manifest at a time, not all manifests/history results. No local
+        I/O, global feed scans, concurrency, or snapshot guarantees.
+        """
+        self._validate_package(feed, name)
+        _validate_scope(scope, project)
+        path = package_path(relative_path)
+        selected: tuple[str, ...] | None = None
+        if versions is not None:
+            if isinstance(versions, (str, bytes, bytearray)) or not isinstance(versions, Sequence):
+                raise ValueError("versions must be a sequence of exact version strings or None")
+            selected = tuple(versions)
+            for version in selected:
+                if not isinstance(version, str) or version_pattern(version) is not None:
+                    raise ValueError("History requires exact Universal Package versions")
+
+        def iterate() -> Iterator[FileVersion]:
+            self._ensure_open()
+            names: Iterator[str]
+            if selected is None:
+                catalog = self.list_package_versions(
+                    feed=feed, name=name, scope=scope, project=project
+                )
+                names = (entry.normalized_version or entry.version for entry in catalog)
+            else:
+                names = iter(selected)
+            for version in names:
+                self._ensure_open()
+                file = self._find_file(feed, name, version, project, path)
+                if file is not None:
+                    self._ensure_open()
+                    yield FileVersion(version, file)
+                    self._ensure_open()
+
+        return iterate()
+
     def download(
         self,
         *,
@@ -416,10 +560,8 @@ class UniversalPackageClient:
         _validate_scope(scope, project)
         if not isinstance(overwrite, bool):
             raise ValueError("overwrite must be a boolean")
-        services = self.discover_services()
-        blob_url = services.get("dedup")
-        if blob_url is None:
-            raise ProtocolError("ResourceAreas did not advertise a dedup service")
+        file_filter = validate_file_filter(file_filter)
+        blob_url = self._blob_url()
         if prefix is not None:
             version = resolve_version(
                 name,

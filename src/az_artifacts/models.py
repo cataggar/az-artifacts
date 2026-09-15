@@ -1,8 +1,8 @@
-"""Typed catalog summaries, package metadata, and download results."""
+"""Typed catalog summaries, package metadata, inspection, and download results."""
 
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 Scope = Literal["organization", "project"]
@@ -139,6 +139,32 @@ class PackageVersionDeletionState:
     name: str
     version: str
     deleted_date: datetime | None = None
+
+
+@dataclass(frozen=True)
+class PackageFile:
+    """A logical file described by a package manifest.
+
+    ``path`` is a case-sensitive, package-relative POSIX path, not a local path.
+    ``size`` is the logical byte length. ``content_id`` is the uppercase dedup
+    chunk/node ID, including its type suffix, NOT necessarily a flat file hash.
+    """
+
+    path: PurePosixPath
+    size: int
+    content_id: str
+
+
+@dataclass(frozen=True)
+class FileVersion:
+    """An exact package ``version`` containing the path described by ``file``.
+
+    Files have no independent version: this associates a path with its package
+    version, without asserting that its content changed from another version.
+    """
+
+    version: str
+    file: PackageFile
 
 
 @dataclass(frozen=True)

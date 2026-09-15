@@ -1,14 +1,26 @@
-from pathlib import Path
+import ntpath
+import posixpath
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from types import SimpleNamespace
 
 import pytest
 
-from az_artifacts._paths import prepare_destination, relative_path, select_files
+from az_artifacts import _paths
+from az_artifacts._paths import (
+    filter_files,
+    manifest_files,
+    package_path,
+    prepare_destination,
+    relative_path,
+    select_files,
+    validate_file_filter,
+)
 from az_artifacts.errors import NoMatchingFilesError, UnsafePathError
 from az_artifacts.models import BlobRef, ManifestItem
 
 
 def items(*paths):
-    return tuple(ManifestItem(path, BlobRef("00" * 32 + "01", 0)) for path in paths)
+    return manifest_files(tuple(ManifestItem(path, BlobRef("00" * 32 + "01", 0)) for path in paths))
 
 
 def test_manifest_leading_slash_is_package_relative():
@@ -78,6 +90,75 @@ def test_hidden_files_are_included():
 
 def test_empty_manifest():
     assert select_files((), None) == ()
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["CON", "dir/aux.txt", "trail.", "trail ", "q?", "star*", "dir/name:stream", "<x>", 'a"b'],
+)
+def test_portable_files_ignore_windows_names_but_download_rejects_all_entries(monkeypatch, path):
+    monkeypatch.setattr(_paths, "os", SimpleNamespace(name="nt", path=ntpath))
+    files = items("safe", path)
+    assert files[1].path == PurePosixPath(path)
+    assert filter_files(files, None) == files
+    with pytest.raises(UnsafePathError):
+        select_files(files, "safe")
+
+
+@pytest.mark.parametrize("paths", [("FILE", "file"), ("DIR", "dir/file")])
+def test_windows_collisions_do_not_affect_logical_inspection(monkeypatch, paths):
+    monkeypatch.setattr(_paths, "os", SimpleNamespace(name="nt", path=ntpath))
+    files = items(*paths)
+    assert len(filter_files(files, None)) == 2
+    with pytest.raises(UnsafePathError):
+        select_files(files, "unmatched")
+
+
+@pytest.mark.parametrize("paths", [("é", "e\u0301"), ("É", "e\u0301/file")])
+def test_macos_unicode_collisions_do_not_affect_logical_inspection(monkeypatch, paths):
+    monkeypatch.setattr(_paths, "os", SimpleNamespace(name="posix", path=posixpath))
+    monkeypatch.setattr(_paths, "sys", SimpleNamespace(platform="darwin"))
+    files = items(*paths)
+    assert len(filter_files(files, None)) == 2
+    with pytest.raises(UnsafePathError):
+        select_files(files, "unmatched")
+
+
+def test_download_preserves_colon_restriction_on_posix(monkeypatch):
+    monkeypatch.setattr(_paths, "os", SimpleNamespace(name="posix", path=posixpath))
+    with pytest.raises(UnsafePathError):
+        select_files(items("dir/name:stream"), None)
+
+
+@pytest.mark.parametrize("path", ["/file", "//file", "", ".", "a//b", "a/./b", "a/../b"])
+def test_caller_path_is_explicitly_relative(path):
+    with pytest.raises(UnsafePathError):
+        package_path(path)
+
+
+@pytest.mark.parametrize("path", [Path("file"), PureWindowsPath("file"), None, 1])
+def test_caller_path_rejects_host_path_and_invalid_types(path):
+    with pytest.raises(ValueError):
+        package_path(path)
+
+
+def test_caller_pure_posix_path_uses_its_existing_normalization():
+    assert package_path(PurePosixPath("dir//./file")) == PurePosixPath("dir/file")
+
+
+@pytest.mark.parametrize("patterns", [[], "", "!", ["ok", "!"], [None], b"*", {"*"}, 4])
+def test_invalid_filters_are_rejected_even_without_files(patterns):
+    with pytest.raises(ValueError):
+        validate_file_filter(patterns)
+
+
+def test_portable_filter_is_case_sensitive_and_preserves_manifest_order():
+    files = items("z.TXT", "a.txt", "c.md", "b.txt")
+    assert [file.path.as_posix() for file in filter_files(files, ("*.{txt,md}",))] == [
+        "a.txt",
+        "c.md",
+        "b.txt",
+    ]
 
 
 def test_existing_file_requires_overwrite(tmp_path):

@@ -1,5 +1,7 @@
 import json
+import ntpath
 from threading import Barrier, Lock
+from types import SimpleNamespace
 from uuid import UUID
 
 import httpx
@@ -11,7 +13,9 @@ from az_artifacts import (
     NoMatchingFilesError,
     ProtocolError,
     UniversalPackageClient,
+    UnsafePathError,
     VersionNotFoundError,
+    _paths,
 )
 from az_artifacts.models import BlobRef
 
@@ -355,6 +359,10 @@ def test_wrong_metadata_version_is_rejected(client, service, tmp_path):
         {"version": "latest"},
         {"feed": ".."},
         {"overwrite": "yes"},
+        {"file_filter": []},
+        {"file_filter": "!"},
+        {"file_filter": [None]},
+        {"file_filter": b"*"},
     ],
 )
 def test_invalid_options_do_not_send_requests(client, service, tmp_path, options):
@@ -410,3 +418,28 @@ def test_closed_client(client, tmp_path):
     client.close()
     with pytest.raises(RuntimeError, match="closed"):
         download(client, tmp_path)
+
+
+@pytest.mark.parametrize("paths", [("safe", "../bad"), ("safe", "/safe"), ("dir", "dir/file")])
+def test_download_rejects_invalid_unselected_paths_without_writes(client, service, tmp_path, paths):
+    ref = service.chunk(b"file")
+    service.manifest(dict.fromkeys(paths, ref))
+    output = tmp_path / "output"
+    with pytest.raises(UnsafePathError):
+        download(client, output, file_filter="unmatched")
+    assert not output.exists()
+    assert ref.id not in service.resolve_counts
+
+
+@pytest.mark.parametrize("paths", [("safe", "CON"), ("A", "a"), ("DIR", "dir/file")])
+def test_download_host_guards_apply_to_unselected_files(
+    client, service, tmp_path, monkeypatch, paths
+):
+    monkeypatch.setattr(_paths, "os", SimpleNamespace(name="nt", path=ntpath))
+    ref = service.chunk(b"file")
+    service.manifest(dict.fromkeys(paths, ref))
+    output = tmp_path / "output"
+    with pytest.raises(UnsafePathError):
+        download(client, output, file_filter="unmatched")
+    assert not output.exists()
+    assert ref.id not in service.resolve_counts

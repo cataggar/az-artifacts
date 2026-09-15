@@ -1,4 +1,4 @@
-"""Native Python discovery, metadata, and downloads for Azure DevOps Universal Packages."""
+"""Native Python discovery, inspection, and downloads for Azure DevOps Universal Packages."""
 
 from .auth import BearerToken as BearerToken
 from .auth import TokenCredential as TokenCredential
@@ -17,9 +17,11 @@ from .errors import UnsafePathError as UnsafePathError
 from .errors import VersionNotFoundError as VersionNotFoundError
 from .models import DownloadResult as DownloadResult
 from .models import Feed as Feed
+from .models import FileVersion as FileVersion
 from .models import LimitedPackageMetadata as LimitedPackageMetadata
 from .models import LimitedPackageMetadataListResponse as LimitedPackageMetadataListResponse
 from .models import Package as Package
+from .models import PackageFile as PackageFile
 from .models import PackageMetadata as PackageMetadata
 from .models import PackagePushMetadata as PackagePushMetadata
 from .models import PackageVersion as PackageVersion
