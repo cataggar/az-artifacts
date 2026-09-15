@@ -1,5 +1,6 @@
 import json
 from threading import Barrier, Lock
+from uuid import UUID
 
 import httpx
 import pytest
@@ -286,6 +287,36 @@ def test_project_scoped_version_resolution(client, service, tmp_path):
     )
 
 
+def test_wildcards_share_discovered_feed_service_and_cache(service, tmp_path):
+    service.services.append(
+        {
+            "name": "Renamed",
+            "id": "7ab4e64e-c4d8-4f50-ae73-5ef2e21642a5",
+            "locationUrl": "https://custom.feeds.dev.azure.com/catalog/",
+        }
+    )
+
+    def handler(request):
+        if request.url.host != "custom.feeds.dev.azure.com":
+            return service(request)
+        service.requests.append(request)
+        assert request.url.path.startswith("/catalog/_apis/packaging/Feeds/feed/packages")
+        values = (
+            service.package_pages[0]
+            if request.url.path.endswith("/packages")
+            else [{"version": "1.2.3"}]
+        )
+        return httpx.Response(200, json={"value": values})
+
+    with UniversalPackageClient(
+        "org", credential="test-pat", transport=httpx.MockTransport(handler), retries=0
+    ) as client:
+        assert client.package_version_exists(feed="feed", name="package", version="1.2.3")
+        assert download(client, tmp_path, version="*").metadata.version == "1.2.3"
+    assert sum(r.url.path.endswith("ResourceAreas") for r in service.requests) == 1
+    assert sum(r.url.host == "custom.feeds.dev.azure.com" for r in service.requests) == 4
+
+
 def test_package_name_substrings_do_not_match(client, service, tmp_path):
     service.package_pages = [[{"id": PACKAGE_ID, "name": "package-extra"}]]
     with pytest.raises(VersionNotFoundError):
@@ -294,8 +325,8 @@ def test_package_name_substrings_do_not_match(client, service, tmp_path):
 
 def test_package_search_matches_exact_name_and_paginates(client, service, tmp_path):
     service.package_pages = [
-        [{"id": f"other-{i}", "name": f"package-{i}"} for i in range(100)],
-        [{"id": PACKAGE_ID, "normalizedName": "package"}],
+        [{"id": str(UUID(int=i + 1)), "name": f"package-{i}"} for i in range(100)],
+        [{"id": PACKAGE_ID, "name": "Package", "normalizedName": "package"}],
     ]
     download(client, tmp_path, version="*")
     listings = [r for r in service.requests if r.url.path.endswith("/packages")]
@@ -303,7 +334,7 @@ def test_package_search_matches_exact_name_and_paginates(client, service, tmp_pa
 
 
 def test_repeating_package_page_is_rejected(client, service, tmp_path):
-    page = [{"id": f"other-{i}", "name": f"package-{i}"} for i in range(100)]
+    page = [{"id": str(UUID(int=i + 1)), "name": f"package-{i}"} for i in range(100)]
     service.package_pages = [page, page]
     with pytest.raises(ProtocolError, match="pagination"):
         download(client, tmp_path, version="*")

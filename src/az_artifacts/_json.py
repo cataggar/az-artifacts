@@ -2,16 +2,22 @@
 
 import re
 from datetime import UTC, datetime
+from uuid import UUID
 
+from ._versions import validate_name, version_number
 from .errors import ProtocolError
 from .models import (
     BlobRef,
+    Feed,
     LimitedPackageMetadata,
     LimitedPackageMetadataListResponse,
     ManifestItem,
+    Package,
     PackageMetadata,
     PackagePushMetadata,
+    PackageVersion,
     PackageVersionDeletionState,
+    ProjectReference,
 )
 
 _BLOB_ID = re.compile(r"[0-9A-Fa-f]{64}(?:01|02)\Z")
@@ -59,6 +65,100 @@ def size(value: object, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ProtocolError(f"Expected a nonnegative integer for {label}")
     return value
+
+
+def guid(value: object, label: str) -> str:
+    text = string(value, label)
+    try:
+        return str(UUID(text))
+    except ValueError:
+        raise ProtocolError(f"Expected a GUID for {label}") from None
+
+
+def optional_boolean(value: object, label: str) -> bool | None:
+    if value is not None and not isinstance(value, bool):
+        raise ProtocolError(f"Expected a boolean for {label}")
+    return value
+
+
+def _optional_identity(value: object, label: str) -> str | None:
+    if value is None:
+        return None
+    return string(value, label)
+
+
+def _package_name(value: str) -> None:
+    try:
+        validate_name(value)
+    except ValueError:
+        raise ProtocolError("Package listing returned an invalid Universal Package name") from None
+
+
+def _package_version(value: object) -> str:
+    text = string(value, "package version")
+    if version_number(text) is None:
+        raise ProtocolError("Package listing returned an invalid Universal Package version")
+    return text
+
+
+def project_reference(value: object) -> ProjectReference:
+    obj = as_object(value, "project reference")
+    return ProjectReference(
+        id=guid(obj.get("id"), "project ID"),
+        name=_optional_identity(obj.get("name"), "project name"),
+        visibility=optional_string(obj.get("visibility"), "project visibility"),
+    )
+
+
+def feed(value: object) -> Feed:
+    obj = as_object(value, "feed")
+    project = obj.get("project")
+    return Feed(
+        id=guid(obj.get("id"), "feed ID"),
+        name=string(obj.get("name"), "feed name"),
+        project=project_reference(project) if project is not None else None,
+        description=optional_string(obj.get("description"), "feed description"),
+        deleted_date=optional_date(obj.get("deletedDate"), "feed deletion date"),
+    )
+
+
+def package_version(value: object) -> PackageVersion:
+    obj = as_object(value, "package version")
+    version_id = obj.get("id")
+    normalized = obj.get("normalizedVersion")
+    return PackageVersion(
+        version=_package_version(obj.get("version")),
+        id=guid(version_id, "package version ID") if version_id is not None else None,
+        normalized_version=_package_version(normalized) if normalized is not None else None,
+        is_deleted=optional_boolean(obj.get("isDeleted"), "version deletion state"),
+        is_latest=optional_boolean(obj.get("isLatest"), "latest version state"),
+        publish_date=optional_date(obj.get("publishDate"), "version publish date"),
+        deleted_date=optional_date(obj.get("deletedDate"), "version deletion date"),
+        description=optional_string(obj.get("description"), "version description"),
+        package_description=optional_string(obj.get("packageDescription"), "package description"),
+    )
+
+
+def package(value: object) -> Package:
+    obj = as_object(value, "package")
+    name = string(obj.get("name"), "package name")
+    normalized = _optional_identity(obj.get("normalizedName"), "normalized package name")
+    _package_name(normalized if normalized is not None else name)
+    protocol = _optional_identity(obj.get("protocolType"), "package protocol")
+    if protocol is not None and protocol.lower() != "upack":
+        raise ProtocolError("Package listing returned a non-Universal Package protocol")
+    versions = obj.get("versions")
+    return Package(
+        id=guid(obj.get("id"), "package ID"),
+        name=name,
+        normalized_name=normalized,
+        protocol_type=protocol,
+        versions=(
+            tuple(package_version(entry) for entry in as_list(versions, "package versions"))
+            if versions is not None
+            else None
+        ),
+    )
 
 
 def blob_id(value: object) -> str:

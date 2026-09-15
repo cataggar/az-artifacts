@@ -1,4 +1,4 @@
-"""Typed package metadata and download results."""
+"""Typed catalog summaries, package metadata, and download results."""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -6,6 +6,75 @@ from pathlib import Path
 from typing import Literal
 
 Scope = Literal["organization", "project"]
+
+
+@dataclass(frozen=True)
+class ProjectReference:
+    """A feed's associated project.
+
+    ``id`` is its GUID; ``name`` and ``visibility`` are optional service values.
+    """
+
+    id: str
+    name: str | None = None
+    visibility: str | None = None
+
+
+@dataclass(frozen=True)
+class Feed:
+    """A feed accessible to the caller, not necessarily organization-scoped.
+
+    ``id`` is its GUID and ``name`` its display name. ``project`` preserves the
+    returned association (None when absent), independently of the query scope.
+    ``description`` may be empty; ``deleted_date`` is an optional UTC timestamp.
+    """
+
+    id: str
+    name: str
+    project: ProjectReference | None = None
+    description: str | None = None
+    deleted_date: datetime | None = None
+
+
+@dataclass(frozen=True)
+class PackageVersion:
+    """A Universal Package version summary, including prereleases.
+
+    ``version`` is the display version; optional ``normalized_version`` is its
+    package-type identity. ``id`` is the optional version GUID. ``is_deleted``
+    and ``is_latest`` preserve the service flags, or None when unknown.
+    ``publish_date`` and ``deleted_date`` are optional timezone-aware UTC dates.
+    ``description`` and ``package_description`` preserve the distinct SDK fields
+    (version description and package description); either may be empty.
+    """
+
+    version: str
+    id: str | None = None
+    normalized_version: str | None = None
+    is_deleted: bool | None = None
+    is_latest: bool | None = None
+    publish_date: datetime | None = None
+    deleted_date: datetime | None = None
+    description: str | None = None
+    package_description: str | None = None
+
+
+@dataclass(frozen=True)
+class Package:
+    """A Universal Package container within the requested feed.
+
+    ``id`` is its GUID and ``name`` its display name. ``normalized_name`` is the
+    optional package-type identity; ``protocol_type`` preserves the optional
+    service protocol string. ``versions`` contains only summaries supplied with
+    this listing, in service order: None means omitted, not an empty catalog.
+    Use list_package_versions() for version enumeration.
+    """
+
+    id: str
+    name: str
+    normalized_name: str | None = None
+    protocol_type: str | None = None
+    versions: tuple[PackageVersion, ...] | None = None
 
 
 @dataclass(frozen=True)
