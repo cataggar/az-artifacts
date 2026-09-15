@@ -1,6 +1,6 @@
 # az-artifacts
 
-Native Python **discovery, metadata, and downloads** for Azure DevOps Universal
+Native Python **discovery, metadata, file inspection, and downloads** for Azure DevOps Universal
 Packages, without ArtifactTool or an Azure CLI runtime dependency.
 
 **Status: early, experimental implementation (0.1.0).**
@@ -175,7 +175,8 @@ again. Start with an include such as `"**/*"` when excluding from the entire
 package; an exclusion by itself does not imply "include everything." The extended
 glob form `!(...)` is not interpreted as an exclusion prefix. Matching is
 case-sensitive and includes dotfiles. A supplied filter matching no files raises
-`NoMatchingFilesError`. Full Azure CLI/ArtifactTool glob parity is not claimed.
+`NoMatchingFilesError` for downloads; `list_files()` instead returns an empty
+tuple. Full Azure CLI/ArtifactTool glob parity is not claimed.
 
 ### Results and failure behavior
 
@@ -226,8 +227,9 @@ filesystem failures can raise ordinary `OSError` subclasses.
 
 The hierarchy is **organization → feed → package → version → files**.
 Project-scoped feeds additionally belong to a project. A file is part of a package
-version, not independently versioned. Read-only file inspection, history, content
-comparison, and registration APIs are **not implemented yet**.
+version, not independently versioned. Manifest-only inspection and path history
+are available below. Content comparison and registration APIs are **not
+implemented yet**.
 
 ```python
 import os
@@ -379,6 +381,130 @@ version segment. This is an **inferred route**, not a live-discovered/verified
 route template. No alternative endpoint is tried on failure. Live Azure DevOps
 compatibility, including collection completeness, remains unverified.
 
+## Inspect package files and path history
+
+These read-only methods retrieve exact metadata and the bounded, hash-validated
+manifest (raw or chunked), **not file payloads or their dedup nodes/URLs**. They
+take no destination and perform **no local filesystem reads or writes**. A
+manifest read requires an advertised Dedup service. Metadata requests omit
+`intent`, unlike `download()` which sends `"Download"`.
+
+```python
+import os
+from pathlib import PurePosixPath
+
+from az_artifacts import UniversalPackageClient
+
+with UniversalPackageClient(
+    "https://dev.azure.com/org",
+    credential=os.environ["AZURE_DEVOPS_EXT_PAT"],
+) as client:
+    files = client.list_files(
+        feed="feed",
+        name="package",
+        version="1.2.3",
+        file_filter=["**/*.{json,txt}", "!private/**"],
+    )
+    for file in files:
+        print(file.path.as_posix(), file.size, file.content_id)
+
+    exists = client.file_exists(
+        feed="feed",
+        name="package",
+        version="1.2.3",
+        relative_path=PurePosixPath("config/settings.json"),
+    )
+
+    # Iteration must finish before the client closes.
+    for entry in client.list_file_versions(
+        feed="feed",
+        name="package",
+        relative_path="config/settings.json",
+        versions=["1.2.3", "2.0.0-rc.1"],
+    ):
+        print(entry.version, entry.file.size, entry.file.content_id)
+```
+
+All arguments are keyword-only. `feed`, `name`, `scope="organization"`, and
+`project=None` have the same meaning as for downloads. Project scope requires
+`project`; organization scope requires its omission.
+
+| Method | Result and arguments |
+| --- | --- |
+| `list_files(*, feed, name, version, file_filter=None, scope="organization", project=None)` | `tuple[PackageFile, ...]` in manifest order. Requires an exact version, including prereleases. Uses the same ordered, case-sensitive glob engine as downloads; no matches returns `()`, not `NoMatchingFilesError`. |
+| `file_exists(*, feed, name, version, relative_path, scope="organization", project=None)` | `bool` for an exact version and exact logical file path; the path is **not a glob**. First uses the catalog to establish visible, nondeleted version presence. |
+| `list_file_versions(*, feed, name, relative_path, versions=None, scope="organization", project=None)` | Lazy `Iterator[FileVersion]` for this path in **this package only**. `None` enumerates visible, nondeleted catalog versions, including prereleases, in service order. An explicit sequence of exact version strings retains caller order and duplicates, bypasses catalog enumeration, and bounds the scan. An empty sequence is a zero-request empty iterator. |
+
+The exported models are frozen dataclasses:
+
+| Model field | Meaning |
+| --- | --- |
+| `PackageFile.path: PurePosixPath` | Case-sensitive, package-relative POSIX path, never a local destination. |
+| `PackageFile.size: int` | Advertised logical file size in bytes. |
+| `PackageFile.content_id: str` | Uppercase typed dedup ID, including its `01` chunk or `02` node suffix. A node ID hashes a serialized dedup node, **not the whole file**; do not treat this field as a flat file digest. |
+| `FileVersion.version: str` | Exact package version containing the requested path. |
+| `FileVersion.file: PackageFile` | That version's manifest entry for the path. |
+
+### Logical paths versus local destinations
+
+`relative_path` accepts a nonempty **string or `PurePosixPath`**, not `Path`,
+`PureWindowsPath`, or another local filesystem object. Use `/` separators and
+omit any leading slash or drive prefix (`C:...`). Strings must not contain
+backslashes, control characters, empty components (including a trailing slash),
+`.` or `..` components. A `PurePosixPath` is validated using its existing
+normalized value: Python has already collapsed repeated separators and `.`
+components before the method receives it. No current-directory inference, path
+resolution, case folding, or Unicode normalization is performed.
+
+Manifest entries still accept the protocol's optional **single leading slash**;
+returned paths never include it. Duplicate logical entries, file/parent overlap,
+traversal, and invalid logical paths fail even if a filter would exclude them.
+All manifest entries are files; parents are implicit, and empty directories are
+not invented or preserved.
+
+Inspection is portable and case-sensitive on Windows too: `A.txt` and `a.txt`
+are distinct, and otherwise valid names such as `CON`, `name?`, or
+`dir/name:stream` can be inspected. This does **not** promise that they can be
+downloaded to the current host. Downloads retain host-reserved-name, case and
+Unicode collision checks for **all entries before filtering**, along with their
+existing colon, symlink, atomic-write, and no-overwrite protections.
+
+### Absence, errors, and history limits
+
+`file_exists()` returns `False` only after successful catalog reads establish
+package/version absence, or a valid manifest lacks the exact path. It does not
+cache negative results. An inaccessible/wrong feed, ambiguous HTTP 404,
+authentication/permission failure, transport failure, or malformed metadata,
+manifest, or manifest blob **raises**, never becomes `False`. A metadata 404
+after the catalog reported a version also raises. A positive result describes
+the manifest, **not current file-payload availability** or historical upload
+provenance. Absence still does not imply publishability; deleted versions remain
+reserved and concurrent publishers can race.
+
+`list_files()` and explicit history use exact metadata reads: a nonexistent
+version is an error, not an empty result. Automatic history raises
+`PackageNotFoundError` for catalog-established missing packages; a present
+package with no visible versions yields nothing. Errors or disappearing versions
+mid-scan propagate, even after earlier records have been yielded.
+
+History validates caller arguments immediately but starts requests only when
+iterated. A bare version string or generator is not a version sequence; use a
+list or tuple. Listing filters accept a nonempty string or nonempty sequence of
+nonempty strings; malformed shapes, bare `!`, and excessive glob expansion fail
+before requests. An unexhausted history iterator requires an open client even
+when the version catalog is buffered.
+
+History retains the explicit version sequence or bounded catalog response, and
+one manifest at a time, governed by `max_manifest_bytes`; it does not accumulate
+all manifests or results internally. Scanning may require metadata and manifest
+requests for **every selected version**, including those without the path. It
+never searches every feed/package, infers renames, detects content changes, or
+provides a snapshot across concurrent catalog changes. Files are not independently
+versioned: history associates the same relative path with package versions.
+Use explicit versions to bound the work. **Live inspection interoperability is
+unverified**, including service-produced raw/chunked manifests and inaccessible
+or deleted resources; fixture tests are not compatibility evidence.
+
 ## Azure CLI comparison and unsupported behavior
 
 This is a Python API, **not** a full reimplementation of
@@ -469,6 +595,12 @@ PY
 
 Compare the downloaded files with your known package contents. A successful
 mock test or build does not substitute for this interoperability check.
+For read-only inspection verification, use the same authorized package and scope
+with `list_files()`, compare paths/sizes to the known contents, check an existing
+and a missing path with `file_exists()`, and bound `list_file_versions()` to known
+exact versions (including a prerelease when available). Repeat against authorized
+organization- and project-scoped fixtures, with raw and chunked manifests.
+Those inspection calls create no local files and do not prove payload availability.
 
 ## Releasing the Python distribution to PyPI
 

@@ -39,7 +39,7 @@ class IntegrityError(ProtocolError):
 
 
 class UnsafePathError(ArtifactsError):
-    """A manifest path cannot safely be written into the destination."""
+    """A logical package path is invalid or cannot safely be written locally."""
 
 
 class NoMatchingFilesError(ArtifactsError):

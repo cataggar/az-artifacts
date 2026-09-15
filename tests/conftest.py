@@ -38,6 +38,7 @@ class AzureService:
         self.missing_urls = set()
         self.version = "1.2.3"
         self.metadata_intent = "Download"
+        self.metadata_by_version = None
         self.versions_metadata = {"count": 1, "value": [{"version": self.version}]}
         self.versions_metadata_headers = {}
         self.versions_metadata_status = 200
@@ -113,6 +114,11 @@ class AzureService:
                     {"intent": self.metadata_intent} if self.metadata_intent is not None else {}
                 )
                 assert request.url.params == httpx.QueryParams(expected)
+                if self.metadata_by_version is not None:
+                    metadata = self.metadata_by_version.get(path.rsplit("/", 1)[-1])
+                    if metadata is None:
+                        return httpx.Response(404)
+                    return httpx.Response(200, json=metadata)
                 return httpx.Response(200, json=self.metadata)
         if path.endswith("/_apis/dedup/urls"):
             assert request.method == "POST"
