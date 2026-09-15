@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  attestations: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  UV_NO_PROGRESS: "1"
+  UV_PYTHON_PREFERENCE: only-managed
+
+jobs:
+  test:
+    name: Python ${{ matrix.python }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: ubuntu-latest
+            python: "3.12"
+          - os: ubuntu-latest
+            python: "3.13"
+          - os: ubuntu-latest
+            python: "3.14"
+            quality: true
+          - os: windows-latest
+            python: "3.14"
+          - os: macos-latest
+            python: "3.14"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install uv with ghr
+        uses: cataggar/ghr/actions/install@114926d37d3825e63bede2ccc7ce56b67eda7495
+        with:
+          ghr-version: v0.8.0
+          tools: astral-sh/uv@0.12.15
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Install Python
+        run: uv python install "${{ matrix.python }}"
+      - name: Sync locked dependencies
+        run: uv sync --locked --group dev --python "${{ matrix.python }}"
+      - name: Test
+        run: uv run --locked pytest
+      - name: Lint
+        if: matrix.quality == true
+        run: uv run --locked ruff check .
+      - name: Check formatting
+        if: matrix.quality == true
+        run: uv run --locked ruff format --check .
+      - name: Type check
+        if: matrix.quality == true
+        run: uv run --locked mypy
+      - name: Build wheel and source distribution
+        if: matrix.quality == true
+        run: uv build
+      - name: Smoke test wheel and source distribution
+        if: matrix.quality == true
+        run: |
+          uv venv --python "${{ matrix.python }}" .wheel-smoke
+          uv pip install --python .wheel-smoke/bin/python dist/*.whl
+          .wheel-smoke/bin/python -I -c "from az_artifacts import UniversalPackageClient; from importlib.metadata import version; print(version('az-artifacts'))"
+          uv venv --python "${{ matrix.python }}" .sdist-smoke
+          uv pip install --python .sdist-smoke/bin/python dist/*.tar.gz
+          .sdist-smoke/bin/python -I -c "from az_artifacts import UniversalPackageClient; from importlib.metadata import version; print(version('az-artifacts'))"
+      - name: Upload distributions
+        if: matrix.quality == true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: python-distributions
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
