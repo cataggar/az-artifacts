@@ -1,4 +1,4 @@
-"""Errors raised by the Universal Package downloader."""
+"""Errors raised by the Universal Package client."""
 
 
 class ArtifactsError(Exception):
@@ -48,3 +48,7 @@ class NoMatchingFilesError(ArtifactsError):
 
 class VersionNotFoundError(ArtifactsError):
     """No released version matches the requested version pattern."""
+
+
+class PackageNotFoundError(ArtifactsError):
+    """Successful catalog enumeration found no visible package with the exact name."""

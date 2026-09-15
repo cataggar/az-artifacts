@@ -1,6 +1,6 @@
 # az-artifacts
 
-Native Python **downloads and read-only metadata** for Azure DevOps Universal
+Native Python **discovery, metadata, and downloads** for Azure DevOps Universal
 Packages, without ArtifactTool or an Azure CLI runtime dependency.
 
 **Status: early, experimental implementation (0.1.0).**
@@ -124,7 +124,7 @@ automatically.
 Use the client as a context manager, or call `close()` when finished.
 The public `discover_services()` method returns the discovered service
 name-to-URL mapping and caches the resource-area lookup for the client's
-lifetime. Downloads and metadata methods perform this discovery automatically.
+lifetime. Downloads, catalog, and metadata methods share this discovery.
 
 | Client argument | Default / meaning |
 | --- | --- |
@@ -217,10 +217,105 @@ Do not modify the output directory concurrently, including from another download
 client or process.
 
 Library errors derive from `ArtifactsError`, including `AuthenticationError`,
-`PermissionDeniedError`, `NotFoundError`, `VersionNotFoundError`,
+`PermissionDeniedError`, `NotFoundError`, `PackageNotFoundError`, `VersionNotFoundError`,
 `NoMatchingFilesError`, `TransportError`, `ProtocolError`, `IntegrityError`, and
 `UnsafePathError`. Invalid arguments can raise `ValueError`/`TypeError`, and local
 filesystem failures can raise ordinary `OSError` subclasses.
+
+## Discover feeds, packages, and versions
+
+The hierarchy is **organization → feed → package → version → files**.
+Project-scoped feeds additionally belong to a project. A file is part of a package
+version, not independently versioned. Read-only file inspection, history, content
+comparison, and registration APIs are **not implemented yet**.
+
+```python
+import os
+
+from az_artifacts import UniversalPackageClient
+
+with UniversalPackageClient(
+    "https://dev.azure.com/org",
+    credential=os.environ["AZURE_DEVOPS_EXT_PAT"],
+) as client:
+    for feed in client.list_feeds():
+        options = (
+            {"scope": "project", "project": feed.project.id}
+            if feed.project is not None
+            else {"scope": "organization"}
+        )
+        print(feed.name, feed.description)
+        for package in client.list_packages(feed=feed.id, name_query="tools", **options):
+            print(package.name, package.normalized_name)
+
+    versions = client.list_package_versions(feed="feed", name="tools", include_deleted=True)
+    for version in versions:
+        print(version.version, version.publish_date, version.is_deleted)
+
+    exists = client.package_version_exists(feed="feed", name="tools", version="1.2.3-rc.1")
+    print(exists)
+```
+
+All arguments are keyword-only. Catalog methods require an open client but no
+Dedup service; they never fetch manifests/payloads or access local files.
+
+| Method | Result and arguments |
+| --- | --- |
+| `list_feeds(project=None)` | Tuple of all accessible feeds in the organization, optionally filtered by project name/ID. Omission does **not** restrict results to organization-scoped feeds. `Feed.project` preserves the returned association rather than inferring scope from the query. |
+| `list_packages(feed=..., name_query=None, page_size=100, scope="organization", project=None)` | Lazy iterator over visible Universal Packages. `feed` is a name/ID; `name_query` is an optional nonempty **substring** query, not an exact identity. `page_size` must be a positive int32, not a boolean. Arguments are checked at call time; requests begin on iteration. |
+| `list_package_versions(feed=..., name=..., include_deleted=False, scope="organization", project=None)` | Tuple of exact-name package versions, including prereleases, in service order. `include_deleted=True` includes both states by omitting `isDeleted`; default requests live versions. No version sorting or stable-only filtering is applied. An established missing package raises `PackageNotFoundError`. |
+| `package_version_exists(feed=..., name=..., version=..., scope="organization", project=None)` | Boolean about a visible, nondeleted **exact** version, including prereleases. Wildcards are not accepted. False requires successful catalog reads establishing absence; failures, including ambiguous HTTP 404s, propagate. |
+
+Feed-specific methods follow `download()` scope rules: `scope="project"` requires
+a project name/ID, while organization scope requires omitting `project`.
+Advancing an unexhausted package iterator after closing its client raises
+`RuntimeError`, including when entries remain buffered.
+
+### Catalog models
+
+These are frozen summaries, not full SDK model parity. GUIDs are validated and
+canonicalized; optional missing/null data remains `None`, not a fabricated value.
+Descriptions can be empty, and dates are timezone-aware UTC datetimes.
+
+| Model | Fields |
+| --- | --- |
+| `ProjectReference` | `id`: project GUID; optional `name` and `visibility`: service project values. |
+| `Feed` | `id`: feed GUID; `name`: display name; optional `project`: associated `ProjectReference`; `description`: feed description; `deleted_date`: deletion timestamp. |
+| `Package` | `id`: package GUID; `name`: display name; optional `normalized_name`: package identity; `protocol_type`: service protocol; `versions`: tuple of only the summaries supplied in the listing. `versions=None` means omitted, **not** no versions; use `list_package_versions()` to enumerate. |
+| `PackageVersion` | `version`: display version; optional `normalized_version`: version identity; `id`: version GUID; `is_deleted` / `is_latest`: service flags; `publish_date` / `deleted_date`: timestamps; `description` / `package_description`: distinct SDK version/package descriptions. |
+
+Exact lookup compares normalized identities when supplied, falling back to valid
+display names/versions only when normalization is absent. Malformed supplied
+fields raise `ProtocolError` instead of being skipped.
+
+### Completeness and absence limits
+
+Package listing traverses `$top`/`$skip` pages until a short/empty final page,
+without accumulating the catalog. Exact-name lookup scans all candidate pages.
+Two page-ID signatures detect immediately repeated and cyclic responses using
+bounded memory; longer cycles can yield repeated entries before detection.
+The int32 offset bound is explicit: exceeding it raises `ProtocolError`, never
+silent truncation. Feed and version listing have no documented paging arguments
+and use one bounded response. Unsupported continuation, partial responses,
+oversized package pages, and inconsistent page counts fail explicitly.
+
+This is **not a transactional snapshot**. Concurrent catalog changes can cause
+duplicates, omissions, or inconsistencies; callers needing a stable traversal
+must coordinate catalog changes themselves. Only service locations are cached,
+not catalog results or negative existence checks.
+
+**Absence does not guarantee publishability.** Deleted versions remain reserved,
+visibility depends on permissions, and another publisher can race with a check.
+An inaccessible/missing feed, authentication/permission failure, transport failure,
+or malformed response is an error, not `False`. Registration remains authoritative;
+there is no `can_publish()` API.
+
+Catalog requests use Feed API `7.1` on `feeds.dev.azure.com`, resolved through the
+shared Feed resource area (by ID/name) or its known organization fallback. Transfer
+metadata uses the separate `pkgs.dev.azure.com` service. No NuGet-only `isListed`
+or `isRelease` filters are sent for Universal Packages. These paths follow the
+[Feed REST API](https://learn.microsoft.com/en-us/rest/api/azure/devops/artifacts/feed-management/get-feeds?view=azure-devops-rest-7.1)
+and pinned SDK; **live catalog compatibility remains unverified**.
 
 ## Read package metadata
 

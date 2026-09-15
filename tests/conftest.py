@@ -11,6 +11,8 @@ from az_artifacts import UniversalPackageClient
 from az_artifacts.models import BlobRef
 
 PACKAGE_ID = "11111111-1111-4111-8111-111111111111"
+FEED_ID = "22222222-2222-4222-8222-222222222222"
+PROJECT_ID = "33333333-3333-4333-8333-333333333333"
 
 
 def identifier(data, kind="01"):
@@ -40,6 +42,7 @@ class AzureService:
         self.versions_metadata_headers = {}
         self.versions_metadata_status = 200
         self.package_pages = [[{"id": PACKAGE_ID, "name": "package"}]]
+        self.feeds = [{"id": FEED_ID, "name": "feed"}]
         self.versions = ["1.2.3"]
         self.services = [
             {"name": "Packaging", "locationUrl": "https://pkgs.dev.azure.com/org/"},
@@ -125,21 +128,30 @@ class AzureService:
                 },
             )
         if host == "feeds.dev.azure.com" and path.endswith("/packages"):
+            assert request.method == "GET"
+            assert request.url.params["api-version"] == "7.1"
             assert request.url.params["protocolType"] == "upack"
-            page = int(request.url.params["$skip"]) // 100
+            assert "isListed" not in request.url.params
+            assert "isRelease" not in request.url.params
+            page = int(request.url.params["$skip"]) // int(request.url.params["$top"])
             values = self.package_pages[page] if page < len(self.package_pages) else []
-            return httpx.Response(200, json={"value": values})
+            return httpx.Response(200, json={"count": len(values), "value": values})
+        if host == "feeds.dev.azure.com" and path.endswith("/Feeds"):
+            assert request.url.params == httpx.QueryParams({"api-version": "7.1"})
+            return httpx.Response(200, json={"count": len(self.feeds), "value": self.feeds})
         if host == "feeds.dev.azure.com" and path.endswith(f"/{PACKAGE_ID}/versions"):
-            assert request.url.params == httpx.QueryParams(
-                {"api-version": "7.1", "isDeleted": "false"}
+            assert request.url.params in (
+                httpx.QueryParams({"api-version": "7.1", "isDeleted": "false"}),
+                httpx.QueryParams({"api-version": "7.1"}),
             )
             return httpx.Response(
                 200,
                 json={
+                    "count": len(self.versions),
                     "value": [
                         value if isinstance(value, dict) else {"version": value}
                         for value in self.versions
-                    ]
+                    ],
                 },
             )
         pytest.fail(f"Unexpected request: {request.method} {host}{path}")

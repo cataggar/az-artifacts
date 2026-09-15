@@ -1,25 +1,34 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-"""Universal Package download and read-only metadata client."""
+"""Universal Package discovery, download, and read-only metadata client."""
 
 import math
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from types import TracebackType
 from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 
-from . import _json
+from . import _catalog, _json
 from ._download import Downloader
 from ._http import Http, endpoint, validate_url
 from ._versions import resolve_version, validate_name, version_pattern
 from .auth import BearerToken, Credential, _validate_token
-from .errors import ProtocolError
-from .models import DownloadResult, LimitedPackageMetadataListResponse, PackageMetadata, Scope
+from .errors import PackageNotFoundError, ProtocolError
+from .models import (
+    DownloadResult,
+    Feed,
+    LimitedPackageMetadataListResponse,
+    Package,
+    PackageMetadata,
+    PackageVersion,
+    Scope,
+)
 
 _UPACK_RESOURCE_AREA = "d397749b-f115-4027-b6dd-77a65dd10d21"
+_FEED_RESOURCE_AREA = "7ab4e64e-c4d8-4f50-ae73-5ef2e21642a5"
 
 
 def _identifier(value: str, label: str) -> None:
@@ -61,7 +70,7 @@ def _organization_url(organization: str) -> tuple[str, str]:
 
 
 class UniversalPackageClient:
-    """Read metadata and download Universal Packages without Azure CLI or ArtifactTool.
+    """Discover, read metadata, and download packages without Azure CLI or ArtifactTool.
 
     Pass a PAT string, a :class:`BearerToken`, or an Azure ``TokenCredential``.
     Use a context manager or call :meth:`close` to release HTTP connections.
@@ -162,6 +171,151 @@ class UniversalPackageClient:
             or services.get("upackpackaging")
             or services.get("packaging")
             or endpoint("https://pkgs.dev.azure.com", self._organization_name)
+        )
+
+    def _feeds_url(self) -> str:
+        services = self.discover_services()
+        return (
+            self._service_ids.get(_FEED_RESOURCE_AREA)
+            or services.get("feed")
+            or endpoint("https://feeds.dev.azure.com", self._organization_name)
+        )
+
+    def list_feeds(self, *, project: str | None = None) -> tuple[Feed, ...]:
+        """List all accessible organization feeds, optionally filtered by project.
+
+        ``project`` is an optional project name or ID, not the feed's inferred
+        scope: each returned Feed.project preserves the service association.
+        Returns a tuple in service order. Requires an open client, not Dedup;
+        no blobs or files are accessed. Service/protocol failures propagate.
+        """
+        self._ensure_open()
+        if project is not None:
+            _identifier(project, "project")
+        return _catalog.list_feeds(self._http, self._feeds_url(), project)
+
+    def list_packages(
+        self,
+        *,
+        feed: str,
+        name_query: str | None = None,
+        page_size: int = 100,
+        scope: Scope = "organization",
+        project: str | None = None,
+    ) -> Iterator[Package]:
+        """Lazily list visible Universal Packages using bounded $top/$skip pages.
+
+        ``feed`` is a feed name or ID; ``name_query`` is an optional nonempty
+        substring filter, NOT an exact identity. ``page_size`` is a positive
+        int32 (not bool). Project scope requires a ``project`` name or ID;
+        otherwise omit it. Arguments are validated immediately; network work
+        begins on iteration. Advancing an unexhausted iterator requires an open
+        client, even for buffered entries. No Dedup, blobs, or filesystem access.
+
+        Memory is bounded per page. Repeated/cyclic pages and unsupported partial
+        responses raise ProtocolError; service errors propagate. Concurrent
+        catalog changes can cause omissions/duplicates: this is not a snapshot.
+        """
+        self._ensure_open()
+        _identifier(feed, "feed")
+        _validate_scope(scope, project)
+        if name_query is not None and (not isinstance(name_query, str) or not name_query):
+            raise ValueError("name_query must be a nonempty string or None")
+        if (
+            isinstance(page_size, bool)
+            or not isinstance(page_size, int)
+            or not 1 <= page_size <= 2_147_483_647
+        ):
+            raise ValueError("page_size must be a positive int32")
+
+        def iterate() -> Iterator[Package]:
+            self._ensure_open()
+            yield from _catalog.list_packages(
+                self._http,
+                self._feeds_url(),
+                project,
+                feed,
+                name_query=name_query,
+                page_size=page_size,
+                include_deleted=False,
+                ensure_open=self._ensure_open,
+            )
+
+        return iterate()
+
+    def _catalog_versions(
+        self, feed: str, name: str, project: str | None, *, include_deleted: bool = False
+    ) -> tuple[PackageVersion, ...] | None:
+        base = self._feeds_url()
+        package = _catalog.find_package(
+            self._http,
+            base,
+            project,
+            feed,
+            name,
+            include_deleted=include_deleted,
+            ensure_open=self._ensure_open,
+        )
+        if package is None:
+            return None
+        self._ensure_open()
+        return _catalog.list_versions(
+            self._http, base, project, feed, package.id, include_deleted=include_deleted
+        )
+
+    def list_package_versions(
+        self,
+        *,
+        feed: str,
+        name: str,
+        include_deleted: bool = False,
+        scope: Scope = "organization",
+        project: str | None = None,
+    ) -> tuple[PackageVersion, ...]:
+        """Enumerate exact-name catalog versions, including prereleases, in service order.
+
+        ``feed`` is a feed name or ID and ``name`` an exact Universal Package
+        name. ``include_deleted`` must be bool; true includes both live/deleted
+        records by omitting isDeleted. Project scope requires ``project``;
+        otherwise omit it. A successful lookup establishing absence raises
+        PackageNotFoundError. HTTP 404 and other service/protocol errors propagate.
+        Requires an open client, not Dedup; no blobs or files are accessed.
+        """
+        self._validate_package(feed, name)
+        _validate_scope(scope, project)
+        if not isinstance(include_deleted, bool):
+            raise ValueError("include_deleted must be a boolean")
+        versions = self._catalog_versions(feed, name, project, include_deleted=include_deleted)
+        if versions is None:
+            raise PackageNotFoundError(f"Universal Package {name!r} was not found in the feed")
+        return versions
+
+    def package_version_exists(
+        self,
+        *,
+        feed: str,
+        name: str,
+        version: str,
+        scope: Scope = "organization",
+        project: str | None = None,
+    ) -> bool:
+        """Check for a visible live exact version without payload or filesystem access.
+
+        ``feed`` is a feed name or ID; ``name`` is an exact package name and
+        ``version`` an exact Universal Package SemVer (prereleases allowed).
+        Project scope requires ``project``; otherwise omit it. Requires an open
+        client, not Dedup. False means successful catalog reads established
+        absence under current permissions, never an HTTP/transport/protocol error.
+        Results are not cached. Absence does not guarantee publishability:
+        deleted versions remain reserved, and concurrent publishers can race.
+        """
+        self._validate_package(feed, name)
+        _validate_scope(scope, project)
+        if version_pattern(version) is not None:
+            raise ValueError("Existence checks require an exact Universal Package version")
+        versions = self._catalog_versions(feed, name, project)
+        return versions is not None and any(
+            (entry.normalized_version or entry.version) == version for entry in versions
         )
 
     def _upack_url(
@@ -268,12 +422,9 @@ class UniversalPackageClient:
             raise ProtocolError("ResourceAreas did not advertise a dedup service")
         if prefix is not None:
             version = resolve_version(
-                self._http,
-                endpoint("https://feeds.dev.azure.com", self._organization_name),
-                project,
-                feed,
                 name,
                 prefix,
+                self._catalog_versions(feed, name, project),
             )
         metadata = self._get_package_metadata(feed, name, version, project, intent="Download")
         downloader = Downloader(
