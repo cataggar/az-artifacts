@@ -16,8 +16,14 @@ entry point, subprocess wrapper, or fallback to ArtifactTool. Azure DevOps Serve
 ## Installation
 
 Requires Python **3.11 or newer**. The runtime dependencies are `httpx` and `wcmatch`.
-Work from this checkout; publication to PyPI and availability of the `az-artifacts`
-PyPI name have **not** been verified.
+
+Install the package from [PyPI](https://pypi.org/project/az-artifacts/):
+
+```bash
+uv add az-artifacts
+```
+
+To work from this checkout:
 
 ```bash
 uv sync --locked --group dev
@@ -319,23 +325,23 @@ inside the `pypi` environment. There are no PyPI password/API-token secrets.
 **Maintainer setup is required before the first release:**
 
 1. Verify the `az-artifacts` PyPI name is available and configure a PyPI project
-   or pending Trusted Publisher. Name availability and publisher configuration
-   have not been verified by this implementation.
+   or pending Trusted Publisher.
 2. Configure the GitHub Trusted Publisher on PyPI with owner `cataggar`,
    repository `az-artifacts`, workflow filename **`pypi.yml`**, and environment
    **`pypi`**. Adjust owner/repository if maintaining a fork.
-3. Create and protect the GitHub **`pypi`** environment: require appropriate
-   reviewer approval and restrict deployment to release tags (`v*`). Merely
-   naming an environment in YAML does not configure these protection rules.
-   Protect release-tag creation through repository rules as appropriate.
+3. Create the GitHub **`pypi`** environment and restrict deployment to release
+   tags (`v*`). This repository publishes automatically for matching tags,
+   without required reviewers. Add reviewer approval if your release policy
+   requires it. Merely naming an environment in YAML does not configure these
+   protection rules. Protect release-tag creation through repository rules
+   as appropriate.
 4. Commit the intended version, lockfile, and tested changes, then create/push
-   the matching `v<version>` tag when ready to release. Approve the publish job
-   only after reviewing its source and build results. Build artifacts are
-   retained for 14 days, so approvals must occur before they expire.
+   the matching `v<version>` tag when ready to release. If required reviewers
+   are configured, approve the publish job only after reviewing its source
+   and build results. Build artifacts are retained for 14 days, so any required
+   approvals must occur before they expire.
 
-No workflow has been dispatched, package published, or remote release/publisher
-configuration created as part of this initial implementation. PyPI publishing
-here distributes the **Python library**; it does not add Universal Package
+PyPI publishing here distributes the **Python library**; it does not add Universal Package
 publishing support.
 
 ## License and provenance
