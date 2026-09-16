@@ -74,6 +74,21 @@ def decode_blob(data: bytes, identifier: str, *, size: int | None, limit: int) -
     return decoded
 
 
+def _validate_ref(ref: BlobRef) -> BlobRef:
+    identifier = _json.blob_id(ref.id)
+    size = _json.size(ref.size, "blob size")
+    if identifier.endswith("01") and size > MAX_CHUNK_BYTES:
+        raise ProtocolError("Advertised blob size exceeds the supported limit")
+    if identifier == _EMPTY_CHUNK_ID and size != 0:
+        raise IntegrityError("Empty chunk does not match its advertised size")
+    return BlobRef(identifier, size)
+
+
+def _check_tree(ref: BlobRef, ancestors: frozenset[str]) -> None:
+    if len(ancestors) >= MAX_TREE_DEPTH or ref.id in ancestors:
+        raise ProtocolError("Dedup tree is cyclic or exceeds the supported depth")
+
+
 class BlobReader:
     def __init__(self, http: Http, blob_url: str) -> None:
         self._http = http
@@ -141,30 +156,55 @@ class BlobReader:
             return decode_blob(response.body, identifier, size=size, limit=limit)
         raise AssertionError("Blob refresh loop exhausted without a result")
 
+    def _node(self, identifier: str, *, size: int | None) -> tuple[BlobRef, ...]:
+        identifier = _json.blob_id(identifier)
+        if not identifier.endswith("02"):
+            raise ProtocolError("Expected a dedup node identifier")
+        node = self.blob(identifier, size=None, limit=MAX_NODE_BYTES)
+        children = tuple(_validate_ref(child) for child in parse_node(node))
+        if size is not None and sum(child.size for child in children) != size:
+            raise IntegrityError("Dedup node children do not match its advertised logical size")
+        return children
+
+    def leaf_refs(self, ref: BlobRef) -> Iterator[BlobRef]:
+        """Yield ordered, validated leaf boundaries, fetching ONLY node blobs.
+
+        Root ID/size validation is eager; node reads and traversal are lazy.
+        Repeated references are yielded repeatedly, not deduplicated. Memory is
+        bounded by node wire size and depth; no payload URLs are prefetched.
+        Partial consumption validates only the structures actually traversed.
+        """
+        return self._leaf_refs(_validate_ref(ref), frozenset())
+
+    def _leaf_refs(self, ref: BlobRef, ancestors: frozenset[str]) -> Iterator[BlobRef]:
+        _check_tree(ref, ancestors)
+        if ref.id.endswith("01"):
+            yield ref
+            return
+        for child in self._node(ref.id, size=ref.size):
+            yield from self._leaf_refs(_validate_ref(child), ancestors | {ref.id})
+
     def content(
         self,
         ref: BlobRef,
         *,
         ancestors: frozenset[str] = frozenset(),
     ) -> Iterator[bytes]:
-        if len(ancestors) >= MAX_TREE_DEPTH or ref.id in ancestors:
-            raise ProtocolError("Dedup tree is cyclic or exceeds the supported depth")
+        ref = _validate_ref(ref)
+        _check_tree(ref, ancestors)
         if ref.id.endswith("01"):
             yield self.blob(ref.id, size=ref.size, limit=MAX_CHUNK_BYTES)
             return
-        node = self.blob(ref.id, size=None, limit=MAX_NODE_BYTES)
-        children = parse_node(node)
-        if sum(child.size for child in children) != ref.size:
-            raise IntegrityError("Dedup node children do not match its advertised logical size")
+        children = self._node(ref.id, size=ref.size)
         self.resolve([child.id for child in children if child.id != _EMPTY_CHUNK_ID])
         for child in children:
             yield from self.content(child, ancestors=ancestors | {ref.id})
 
     def manifest(self, identifier: str, *, limit: int) -> bytes:
+        identifier = _json.blob_id(identifier)
         if identifier.endswith("01"):
             return self.blob(identifier, size=None, limit=limit)
-        node = self.blob(identifier, size=None, limit=MAX_NODE_BYTES)
-        children = parse_node(node)
+        children = self._node(identifier, size=None)
         if sum(child.size for child in children) > limit:
             raise ProtocolError("Manifest exceeds the configured size limit")
         result = bytearray()

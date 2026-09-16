@@ -1,7 +1,7 @@
 # az-artifacts
 
-Native Python **discovery, metadata, file inspection, and downloads** for Azure DevOps Universal
-Packages, without ArtifactTool or an Azure CLI runtime dependency.
+Native Python **discovery, metadata, file inspection/comparison, and downloads** for Azure
+DevOps Universal Packages, without ArtifactTool or an Azure CLI runtime dependency.
 
 **Status: early, experimental implementation (0.1.0).**
 This implements a private transfer protocol using the Rust implementation as
@@ -219,17 +219,17 @@ client or process.
 
 Library errors derive from `ArtifactsError`, including `AuthenticationError`,
 `PermissionDeniedError`, `NotFoundError`, `PackageNotFoundError`, `VersionNotFoundError`,
-`NoMatchingFilesError`, `TransportError`, `ProtocolError`, `IntegrityError`, and
-`UnsafePathError`. Invalid arguments can raise `ValueError`/`TypeError`, and local
-filesystem failures can raise ordinary `OSError` subclasses.
+`NoMatchingFilesError`, `TransportError`, `ProtocolError`, `IntegrityError`,
+`LocalFileChangedError`, and `UnsafePathError`. Invalid arguments can raise
+`ValueError`/`TypeError`, and local filesystem failures can raise ordinary `OSError`
+subclasses.
 
 ## Discover feeds, packages, and versions
 
 The hierarchy is **organization → feed → package → version → files**.
 Project-scoped feeds additionally belong to a project. A file is part of a package
-version, not independently versioned. Manifest-only inspection and path history
-are available below. Content comparison and registration APIs are **not
-implemented yet**.
+version, not independently versioned. Manifest-only inspection, path history, and
+content comparison are available below. Registration APIs are **not implemented yet**.
 
 ```python
 import os
@@ -380,6 +380,105 @@ versionless GET uses
 version segment. This is an **inferred route**, not a live-discovered/verified
 route template. No alternative endpoint is tried on failure. Live Azure DevOps
 compatibility, including collection completeness, remains unverified.
+
+## Compare a local file before uploading
+
+Use `compare_file()` to check whether a local file's content is already represented
+at a path in an **exact** package version, without downloading that file's payload.
+This is a read-only pre-upload check, **not** publishing, registration, or permission
+to reuse a version. A path has no independent version, and one matching file does
+not imply that an entire candidate package matches.
+
+```python
+import os
+from pathlib import Path
+
+from az_artifacts import UniversalPackageClient
+
+with UniversalPackageClient(
+    "https://dev.azure.com/org",
+    credential=os.environ["AZURE_DEVOPS_EXT_PAT"],
+) as client:
+    comparison = client.compare_file(
+        feed="feed",
+        name="package",
+        version="1.2.3-rc.1",
+        relative_path="config/settings.json",
+        local_path=Path("build/config/settings.json"),
+    )
+
+if comparison.status == "match":
+    print("This file's content is already represented in that version.")
+elif comparison.status == "different":
+    print("Local content differs from the manifest; choose an appropriate new version.")
+else:
+    print(comparison.status)  # version_missing or path_missing, not permission to publish.
+```
+
+All arguments are keyword-only:
+`compare_file(*, feed, name, version, relative_path, local_path, scope="organization", project=None)`.
+The feed/name/scope rules match `file_exists()`. Exact prereleases are supported;
+wildcards are not. `relative_path` uses the same literal, case-sensitive, portable
+string/`PurePosixPath` rules described below, not host paths or glob matching.
+`local_path` instead requires a nonempty string or concrete `pathlib.Path`.
+Requires an open client.
+
+The exported frozen `FileComparison` is **not a boolean**:
+
+| Field | Meaning |
+| --- | --- |
+| `status: Literal["version_missing", "path_missing", "match", "different"]` | Established catalog package/version absence, missing exact manifest path, represented content agreement, or content disagreement, respectively. |
+| `metadata: PackageMetadata \| None` | Exact-version metadata when obtained; `None` only for `version_missing`. |
+| `file: PackageFile \| None` | Exact manifest entry for `match` or `different`; `None` for either missing status. |
+
+Arguments are validated first, then the local source is opened **read-only before
+any remote request**, even if the version or path is missing. A missing/unreadable
+local path therefore raises rather than returning a successful-shaped missing
+result. Only regular files are accepted (`ValueError` for directories/special
+files). Symlinks, including parent links, are followed to their regular-file target.
+Special files are rejected before open; POSIX opens additionally use nonblocking
+mode to avoid blocking if the path is replaced by a FIFO during opening.
+No files are created or written. Local `OSError` subclasses and all remote errors
+propagate; there is no unknown/equality/absence fallback or negative cache.
+
+### Comparison algorithm and limits
+
+Network work is metadata-only: visible-live catalog lookup, exact metadata
+(`intent` omitted), one bounded validated manifest read, and only the file's
+traversed dedup **node** blobs. Manifest chunks can themselves be `01` blobs and
+are read; **file payload leaf URLs are never resolved or downloaded**. There is
+no payload-download fallback or publishing chunker.
+
+- A legitimate local/manifest logical-size difference returns `different` early.
+  Equal names or sizes alone never establish a match.
+- For a `01` chunk root, the local bytes are hashed incrementally with ordinary
+  SHA-512, taking its **first 32 digest bytes**, not the distinct SHA-512/256 algorithm.
+- A `02` root identifies a serialized node, not a flat file digest. Its hash-checked
+  tree supplies ordered remote leaf sizes/IDs. Local bytes are read at those
+  boundaries and hashed per leaf, consuming repeated references repeatedly.
+  Node formats, aggregate child sizes, leaf size limits, depth/cycles, and exact
+  EOF are checked. Empty files are supported.
+- Local read buffers are at most 64 KiB; traversal retains bounded node data per
+  depth, never all leaf references or the whole local file. Existing manifest,
+  node-wire, 16 MiB-minus-1 chunk and depth-64 limits apply. Signed node URL
+  refresh and separation of Azure credentials from signed blob requests remain intact.
+
+Do **not mutate, replace, or retarget the source concurrently**. Descriptor/path
+identity, type, size, and modification/change timestamps are checked before every
+returned status. Observed changes, disappearance after opening, and unexpected
+short/extra reads raise `LocalFileChangedError`. These checks are **not an atomic
+filesystem snapshot**: changes hidden by filesystem timestamp granularity or
+restored metadata can escape detection, as can changes after the final check.
+
+A mismatch may stop before further nodes are visited: `different` means
+disagreement with the manifest, **not a complete remote health audit**.
+Traversed malformed/missing/corrupt metadata raises, never `match` or absence.
+`match` verifies represented content, not current payload availability or
+historical upload provenance. Catalog absence does not ensure publishability:
+deleted versions stay reserved and concurrent publishers can race.
+The algorithm follows the existing decoder and mock fixtures; **live Azure
+single-chunk and multi-level package interoperability remains unverified**.
+Full uploading/publishing and `add_package()` registration are still unavailable.
 
 ## Inspect package files and path history
 

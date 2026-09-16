@@ -6,6 +6,7 @@ from .client import UniversalPackageClient as UniversalPackageClient
 from .errors import ArtifactsError as ArtifactsError
 from .errors import AuthenticationError as AuthenticationError
 from .errors import IntegrityError as IntegrityError
+from .errors import LocalFileChangedError as LocalFileChangedError
 from .errors import NoMatchingFilesError as NoMatchingFilesError
 from .errors import NotFoundError as NotFoundError
 from .errors import PackageNotFoundError as PackageNotFoundError
@@ -17,6 +18,7 @@ from .errors import UnsafePathError as UnsafePathError
 from .errors import VersionNotFoundError as VersionNotFoundError
 from .models import DownloadResult as DownloadResult
 from .models import Feed as Feed
+from .models import FileComparison as FileComparison
 from .models import FileVersion as FileVersion
 from .models import LimitedPackageMetadata as LimitedPackageMetadata
 from .models import LimitedPackageMetadataListResponse as LimitedPackageMetadataListResponse
