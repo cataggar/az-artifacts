@@ -210,7 +210,7 @@ def normalized(value):
 def limits_from(config):
     limits = config["limits"]
     maxima = {
-        "requests": 10000, "items": 100000, "seconds": 3600,
+        "requests": 10000, "items": 250000, "seconds": 3600,
         "response_bytes": 64 * 1024 * 1024, "total_bytes": 256 * 1024 * 1024,
         "manifest_bytes": 64 * 1024 * 1024, "cases": 1000,
     }

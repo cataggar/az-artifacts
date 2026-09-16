@@ -305,6 +305,65 @@ def test_baseline_request_binding_rejects_reordered_case(acceptance):
     assert case_report(acceptance, "case-0001")["reason"] == "baseline-mismatch"
 
 
+@pytest.mark.parametrize("change", ["none", "count", "description", "order", "missing-field"])
+def test_digest_only_feed_oracle_preserves_all_data_without_recording_it(
+    acceptance, capsys, change,
+):
+    root, config, baseline, output, service = acceptance
+    case = config["cases"][0]
+    feeds = copy.deepcopy(baseline["cases"][0]["expected"])
+    secret = "https://example.test/feed?sig=synthetic-feed-secret#fragment"
+    feeds[0]["description"] = secret
+    feeds.append({**feeds[0], "id": issue3_example.OTHER_ID, "name": "other-feed"})
+    expected = copy.deepcopy(feeds)
+    if change == "missing-field":
+        expected[0].pop("deleted_date")
+    entry = {
+        "request": case, "expected_count": len(feeds) + (change == "count"),
+        "expected_sha256": hashlib.sha256(json.dumps(
+            expected, separators=(",", ":"), ensure_ascii=True, sort_keys=True,
+        ).encode("ascii")).hexdigest(),
+    }
+    config["cases"] = [case]
+    baseline["cases"] = [entry]
+    baseline["fixture_only"] = False
+    (root / config["baseline_file"]).write_text(json.dumps(baseline))
+    loaded = issue3_readonly.baseline_from(root, config)
+    if change == "description":
+        feeds[0]["description"] += "-changed"
+    elif change == "order":
+        feeds.reverse()
+
+    def response(request):
+        if request.url.path.endswith("/Feeds"):
+            return httpx.Response(200, json={"count": len(feeds), "value": wire(feeds)})
+        return service(request)
+
+    _, statuses = execute((root, config, loaded, output, response))
+    assert statuses["case-0001"] == ("pass" if change == "none" else "fail")
+    persisted = "".join(path.read_text() for path in output.iterdir()) + capsys.readouterr().out
+    assert secret not in persisted and "synthetic-feed-secret" not in persisted
+    assert secret not in (root / config["baseline_file"]).read_text()
+
+
+@pytest.mark.parametrize("mode", ["other-method", "mixed", "bad-digest", "missing-count"])
+def test_digest_oracle_requires_exclusive_complete_feed_expectation(acceptance, mode):
+    config, baseline, service = acceptance[1], acceptance[2], acceptance[4]
+    case = config["cases"][4 if mode == "other-method" else 0]
+    entry = {"request": case, "expected_sha256": "a" * 64, "expected_count": 0}
+    if mode == "mixed":
+        entry["expected"] = []
+    elif mode == "bad-digest":
+        entry["expected_sha256"] = "invalid"
+    elif mode == "missing-count":
+        entry.pop("expected_count")
+    config["cases"] = [case]
+    baseline["cases"] = [entry]
+    _, statuses = execute(acceptance)
+    assert statuses["case-0001"] == "fail"
+    assert not service.requests
+
+
 @pytest.mark.parametrize("limit,value", [("requests", 1), ("items", 1), ("total_bytes", 1)])
 def test_global_caps_report_incomplete(acceptance, limit, value):
     acceptance[1]["limits"][limit] = value

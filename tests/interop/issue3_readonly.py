@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 from uuid import UUID
 
 import httpx
@@ -28,7 +29,7 @@ ERRORS = {
     "PackageNotFoundError", "ProtocolError", "IntegrityError", "TransportError",
 }
 ARGUMENTS = {
-    "list_feeds": set(),
+    "list_feeds": {"max_response_bytes"},
     "list_packages": {"name_query", "page_size"},
     "list_package_versions": {"name", "include_deleted"},
     "package_version_exists": {"name", "version"},
@@ -54,9 +55,15 @@ def baseline_from(root, config):
 
 
 def expected_result(entry):
-    if "expected" not in entry and "error" not in entry:
+    modes = sum(key in entry for key in ("expected", "expected_sha256", "error"))
+    if not modes:
         raise support.Incomplete("Independent expectation unavailable")
-    support.require(("expected" in entry) != ("error" in entry))
+    support.require(modes == 1)
+    if "expected_sha256" in entry:
+        support.require(entry["request"]["method"] == "list_feeds")
+        support.require(isinstance(entry["expected_sha256"], str) and
+                        re.fullmatch(r"[0-9a-f]{64}", entry["expected_sha256"]) is not None)
+        support.require(type(entry.get("expected_count")) is int and entry["expected_count"] >= 0)
     if "error" in entry:
         support.require(entry["error"] in ERRORS)
         support.require(entry.get("operation") in {
@@ -240,6 +247,12 @@ def execute_case(client, method, args, entry, guard):
                 or guard.records[-1]["operation"] != entry.get("operation")):
             raise support.BoundaryError("Unexpected service outcome",
                                         reason=support.reason_code(error)) from None
+    elif "expected_sha256" in entry:
+        support.require(isinstance(actual, list) and len(actual) == entry["expected_count"],
+                        reason=support.Reason.BASELINE_MISMATCH)
+        canonical = json.dumps(actual, separators=(",", ":"), ensure_ascii=True, sort_keys=True)
+        support.require(hashlib.sha256(canonical.encode("ascii")).hexdigest() ==
+                        entry["expected_sha256"], reason=support.Reason.BASELINE_MISMATCH)
     elif "error" in entry or actual != entry["expected"]:
         raise support.BoundaryError("Independent baseline mismatch",
                                     reason=support.Reason.BASELINE_MISMATCH)

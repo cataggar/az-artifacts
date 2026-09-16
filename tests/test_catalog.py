@@ -1,4 +1,5 @@
 import builtins
+import json
 import os
 from pathlib import Path
 from uuid import UUID
@@ -78,11 +79,59 @@ def test_list_feeds_retains_actual_project_association(client, service):
     requests = catalog_requests(service)
     assert requests[0].url.path == "/org/_apis/packaging/Feeds"
     assert requests[1].url.raw_path == (
-        b"/org/Query%20Project/_apis/packaging/Feeds?api-version=7.1"
+        b"/org/Query%20Project/_apis/packaging/Feeds"
+        b"?api-version=7.1&includeUrls=false&includeDeletedUpstreams=false"
     )
     assert all(
-        request.url.params == httpx.QueryParams({"api-version": "7.1"}) for request in requests
+        request.url.params == httpx.QueryParams({
+            "api-version": "7.1", "includeUrls": "false", "includeDeletedUpstreams": "false",
+        }) for request in requests
     )
+
+
+def test_complete_feed_response_can_exceed_general_response_limit(service):
+    body = json.dumps({
+        "count": 1, "value": service.feeds, "unmodeledDetails": "x" * (16 * 1024 * 1024),
+    }).encode()
+
+    def response(request):
+        if request.url.path.endswith("/Feeds"):
+            return httpx.Response(200, content=body)
+        if request.url.path.endswith("/packages"):
+            return httpx.Response(200, content=body)
+        return service(request)
+
+    with UniversalPackageClient(
+        "https://dev.azure.com/org", credential="test-pat",
+        transport=httpx.MockTransport(response), retries=0,
+    ) as client:
+        assert client.list_feeds() == (Feed(FEED_ID, "feed"),)
+        with pytest.raises(ProtocolError, match="size limit"):
+            tuple(client.list_packages(feed="feed"))
+
+
+def test_feed_response_limit_is_enforced_at_the_exact_byte_boundary(service):
+    body = json.dumps({"count": 1, "value": service.feeds}).encode()
+
+    def response(request):
+        if request.url.path.endswith("/Feeds"):
+            return httpx.Response(200, content=body)
+        return service(request)
+
+    with UniversalPackageClient(
+        "https://dev.azure.com/org", credential="test-pat",
+        transport=httpx.MockTransport(response), retries=0,
+    ) as client:
+        assert client.list_feeds(max_response_bytes=len(body)) == (Feed(FEED_ID, "feed"),)
+        with pytest.raises(ProtocolError, match="size limit"):
+            client.list_feeds(max_response_bytes=len(body) - 1)
+
+
+@pytest.mark.parametrize("value", [0, -1, False, True, None, "100", 1.0])
+def test_feed_response_limit_is_validated_before_network(client, service, value):
+    with pytest.raises(ValueError, match="positive integer"):
+        client.list_feeds(max_response_bytes=value)
+    assert not service.requests
 
 
 def test_empty_feeds_and_packages(client, service):

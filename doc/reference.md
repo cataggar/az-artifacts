@@ -257,6 +257,9 @@ at a passing prefix. Deadline checks occur before requests, during response and
 control reads, and during fixture traversal; per-request timeouts shrink to the
 remaining budget. As with synchronous sockets/filesystem I/O, this is not a
 hard real-time process-kill deadline.
+For large complete feed listings, explicitly raise `response_bytes` (at most
+64 MiB), `total_bytes` (at most 256 MiB), and cumulative `items` (at most 250000)
+as needed. These harness budgets are independent of the client's per-call limit.
 
 Each target contains:
 
@@ -323,9 +326,15 @@ length. This normalization is the caller's independently reviewed baseline, not
 a second native call.
 
 Each baseline `cases[i]` binds to exactly `config.cases[i]` through a `request`
-copy and contains either:
+copy and contains exactly one expectation form:
 
 - `expected`: the complete normalized result (including booleans), or
+- For `list_feeds` only, `expected_sha256` plus `expected_count`: a digest of
+  the complete independently normalized ordered feed list and its length. Use
+  `sha256(json.dumps(values, separators=(",", ":"), ensure_ascii=True,
+  sort_keys=True).encode("ascii")).hexdigest()`. This preserves every modeled
+  field, including descriptions, without storing private description text or
+  embedded URLs in the baseline. List order is not sorted or discarded.
 - `error`: an expected public error class name, and `status_code` for HTTP errors.
   Errors can be `AuthenticationError`, `PermissionDeniedError`, `NotFoundError`,
   `PackageNotFoundError`, `ProtocolError`, `IntegrityError`, or `TransportError`.
@@ -756,7 +765,7 @@ Dedup service; they never fetch manifests/payloads or access local files.
 
 | Method | Result and arguments |
 | --- | --- |
-| `list_feeds(project=None)` | Tuple of all accessible feeds in the organization, optionally filtered by project name/ID. Omission does **not** restrict results to organization-scoped feeds. `Feed.project` preserves the returned association rather than inferring scope from the query. |
+| `list_feeds(project=None, max_response_bytes=67108864)` | Tuple of all accessible feeds in the organization, optionally filtered by project name/ID. Omission does **not** restrict results to organization-scoped feeds. `Feed.project` preserves the returned association rather than inferring scope from the query. The positive integer byte limit bounds the complete decoded feed response; it does not change other API limits. |
 | `list_packages(feed=..., name_query=None, page_size=100, scope="organization", project=None)` | Lazy iterator over visible Universal Packages. `feed` is a name/ID; `name_query` is an optional nonempty **substring** query, not an exact identity. `page_size` must be a positive int32, not a boolean. Arguments are checked at call time; requests begin on iteration. |
 | `list_package_versions(feed=..., name=..., include_deleted=False, scope="organization", project=None)` | Tuple of exact-name package versions, including prereleases, in service order. `include_deleted=True` includes both states by omitting `isDeleted`; default requests live versions. No version sorting or stable-only filtering is applied. An established missing package raises `PackageNotFoundError`. |
 | `package_version_exists(feed=..., name=..., version=..., scope="organization", project=None)` | Boolean about a visible, nondeleted **exact** version, including prereleases. Wildcards are not accepted. False requires successful catalog reads establishing absence; failures, including ambiguous HTTP 404s, propagate. |
@@ -765,6 +774,14 @@ Feed-specific methods follow `download()` scope rules: `scope="project"` require
 a project name/ID, while organization scope requires omitting `project`.
 Advancing an unexhausted package iterator after closing its client raises
 `RuntimeError`, including when entries remain buffered.
+
+Feed enumeration disables optional URL expansion and deleted-upstream details
+using the documented `includeUrls=false` and `includeDeletedUpstreams=false`
+options. Neither contributes fields to the public `Feed` model. There is no
+documented pagination for this endpoint, so its response has a separate default
+64 MiB bound. Increase `max_response_bytes` explicitly for larger organizations;
+oversized, partial, or continued responses raise `ProtocolError` rather than
+returning an incomplete feed list.
 
 ### Catalog models
 
