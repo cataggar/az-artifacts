@@ -11,7 +11,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 
-from . import _catalog, _json, _manifest
+from . import _catalog, _inspection, _json, _manifest
 from ._dedup import BlobReader
 from ._download import Downloader
 from ._http import Http, endpoint, validate_url
@@ -22,6 +22,7 @@ from .errors import PackageNotFoundError, ProtocolError
 from .models import (
     DownloadResult,
     Feed,
+    FileComparison,
     FileVersion,
     LimitedPackageMetadataListResponse,
     Package,
@@ -406,9 +407,15 @@ class UniversalPackageClient:
     def _package_files(
         self, feed: str, name: str, version: str, project: str | None
     ) -> tuple[PackageFile, ...]:
+        return self._exact_manifest(feed, name, version, project)[1]
+
+    def _exact_manifest(
+        self, feed: str, name: str, version: str, project: str | None
+    ) -> tuple[PackageMetadata, tuple[PackageFile, ...], BlobReader]:
         reader = BlobReader(self._http, self._blob_url())
         metadata = self._get_package_metadata(feed, name, version, project, intent=None)
-        return _manifest.load(reader, metadata, max_bytes=self._max_manifest_bytes)
+        files = _manifest.load(reader, metadata, max_bytes=self._max_manifest_bytes)
+        return metadata, files, reader
 
     def _find_file(
         self,
@@ -478,6 +485,58 @@ class UniversalPackageClient:
         ):
             return False
         return self._find_file(feed, name, version, project, path) is not None
+
+    def compare_file(
+        self,
+        *,
+        feed: str,
+        name: str,
+        version: str,
+        relative_path: str | PurePosixPath,
+        local_path: str | Path,
+        scope: Scope = "organization",
+        project: str | None = None,
+    ) -> FileComparison:
+        """Compare a local regular file with an exact version's represented content.
+
+        Common arguments and the literal, portable ``relative_path`` follow
+        file_exists(). ``version`` must be exact, including prereleases.
+        ``local_path`` is a nonempty local string or Path; symlinks are followed.
+        All arguments are validated, then the local file is opened read-only
+        BEFORE catalog access, even when the version/path is absent.
+
+        Returns frozen FileComparison with status version_missing, path_missing,
+        match or different and available metadata/file. No negative caching.
+        Fetches catalog, exact metadata, manifest and traversed dedup nodes, never
+        file payloads or their URLs. Local bytes are hashed at remote boundaries.
+        A size/hash mismatch can stop early: different is not a remote health
+        audit, and match does not prove payload availability/upload provenance.
+
+        Do not mutate the source concurrently. Identity, size and timestamp
+        checks detect observable changes (LocalFileChangedError), not an atomic
+        snapshot. Nonregular files raise ValueError; other local I/O and all
+        remote/protocol failures propagate. Requires an open client.
+        """
+        self._validate_package(feed, name)
+        _validate_scope(scope, project)
+        if version_pattern(version) is not None:
+            raise ValueError("Comparison requires an exact Universal Package version")
+        path = package_path(relative_path)
+        source = _inspection.local_path(local_path)
+        with _inspection.open_local(source) as (stream, size):
+            if not self.package_version_exists(
+                feed=feed, name=name, version=version, scope=scope, project=project
+            ):
+                return FileComparison("version_missing", None, None)
+            metadata, files, reader = self._exact_manifest(feed, name, version, project)
+            file = next((entry for entry in files if entry.path == path), None)
+            if file is None:
+                return FileComparison("path_missing", metadata, None)
+            return FileComparison(
+                "match" if _inspection.matches(stream, size, file, reader) else "different",
+                metadata,
+                file,
+            )
 
     def list_file_versions(
         self,

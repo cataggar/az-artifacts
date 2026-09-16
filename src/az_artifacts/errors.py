@@ -38,6 +38,14 @@ class IntegrityError(ProtocolError):
     """Downloaded content does not match its advertised hash or size."""
 
 
+class LocalFileChangedError(ArtifactsError):
+    """The local source observably changed, was replaced, or disappeared during comparison.
+
+    Checks are best-effort, not an atomic snapshot or protection against concurrent
+    writers restoring file metadata. Other local I/O errors remain OSError.
+    """
+
+
 class UnsafePathError(ArtifactsError):
     """A logical package path is invalid or cannot safely be written locally."""
 

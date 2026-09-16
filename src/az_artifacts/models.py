@@ -168,6 +168,23 @@ class FileVersion:
 
 
 @dataclass(frozen=True)
+class FileComparison:
+    """Comparison of a local file with one exact package version's manifest.
+
+    ``status`` is ``version_missing`` for catalog-established package/version
+    absence, ``path_missing`` for an absent manifest path, or ``match`` /
+    ``different`` for content agreement / disagreement with that manifest.
+    ``metadata`` is None only for version_missing, otherwise the exact metadata.
+    ``file`` is the manifest entry for match/different, otherwise None.
+    A match verifies represented content, not remote payload availability.
+    """
+
+    status: Literal["version_missing", "path_missing", "match", "different"]
+    metadata: PackageMetadata | None
+    file: PackageFile | None
+
+
+@dataclass(frozen=True)
 class DownloadResult:
     metadata: PackageMetadata
     path: Path
