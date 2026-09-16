@@ -155,7 +155,13 @@ class AzureService:
             values = self.package_pages[page] if page < len(self.package_pages) else []
             return httpx.Response(200, json={"count": len(values), "value": values})
         if host == "feeds.dev.azure.com" and path.endswith("/Feeds"):
-            assert request.url.params == httpx.QueryParams({"api-version": "7.1"})
+            assert request.url.params == httpx.QueryParams(
+                {
+                    "api-version": "7.1",
+                    "includeUrls": "false",
+                    "includeDeletedUpstreams": "false",
+                }
+            )
             return httpx.Response(200, json={"count": len(self.feeds), "value": self.feeds})
         if host == "feeds.dev.azure.com" and path.endswith(f"/{PACKAGE_ID}/versions"):
             assert request.url.params in (

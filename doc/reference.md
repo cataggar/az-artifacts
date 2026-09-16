@@ -442,7 +442,7 @@ Dedup service; they never fetch manifests/payloads or access local files.
 
 | Method | Result and arguments |
 | --- | --- |
-| `list_feeds(project=None)` | Tuple of all accessible feeds in the organization, optionally filtered by project name/ID. Omission does **not** restrict results to organization-scoped feeds. `Feed.project` preserves the returned association rather than inferring scope from the query. |
+| `list_feeds(project=None, max_response_bytes=67108864)` | Tuple of all accessible feeds in the organization, optionally filtered by project name/ID. Omission does **not** restrict results to organization-scoped feeds. `Feed.project` preserves the returned association rather than inferring scope from the query. The positive integer byte limit bounds the complete decoded feed response; it does not change other API limits. |
 | `list_packages(feed=..., name_query=None, page_size=100, scope="organization", project=None)` | Lazy iterator over visible Universal Packages. `feed` is a name/ID; `name_query` is an optional nonempty **substring** query, not an exact identity. `page_size` must be a positive int32, not a boolean. Arguments are checked at call time; requests begin on iteration. |
 | `list_package_versions(feed=..., name=..., include_deleted=False, scope="organization", project=None)` | Tuple of exact-name package versions, including prereleases, in service order. `include_deleted=True` includes both states by omitting `isDeleted`; default requests live versions. No version sorting or stable-only filtering is applied. An established missing package raises `PackageNotFoundError`. |
 | `package_version_exists(feed=..., name=..., version=..., scope="organization", project=None)` | Boolean about a visible, nondeleted **exact** version, including prereleases. Wildcards are not accepted. False requires successful catalog reads establishing absence; failures, including ambiguous HTTP 404s, propagate. |
@@ -451,6 +451,14 @@ Feed-specific methods follow `download()` scope rules: `scope="project"` require
 a project name/ID, while organization scope requires omitting `project`.
 Advancing an unexhausted package iterator after closing its client raises
 `RuntimeError`, including when entries remain buffered.
+
+Feed enumeration disables optional URL expansion and deleted-upstream details
+using the documented `includeUrls=false` and `includeDeletedUpstreams=false`
+options. Neither contributes fields to the public `Feed` model. There is no
+documented pagination for this endpoint, so its response has a separate default
+64 MiB bound. Increase `max_response_bytes` explicitly for larger organizations;
+oversized, partial, or continued responses raise `ProtocolError` rather than
+returning an incomplete feed list.
 
 ### Catalog models
 
@@ -496,7 +504,9 @@ shared Feed resource area (by ID/name) or its known organization fallback. Trans
 metadata and registration use the separate `pkgs.dev.azure.com` service. No NuGet-only `isListed`
 or `isRelease` filters are sent for Universal Packages. These paths follow the
 [Feed REST API](https://learn.microsoft.com/en-us/rest/api/azure/devops/artifacts/feed-management/get-feeds?view=azure-devops-rest-7.1)
-and pinned SDK; **live catalog compatibility remains unverified**.
+and pinned SDK. Live feed/package/version enumeration, forced package pagination and
+existence checks have been verified against independent REST baselines in both
+feed scopes using names and IDs, including complete bounded feed responses.
 
 ## Read package metadata
 
@@ -546,7 +556,7 @@ The exported frozen `PackageVersionDeletionState(name, version, deleted_date=Non
 remains **data only**, with an optional timezone-aware UTC deletion timestamp;
 there is no deletion/restore API.
 
-### SDK capability mapping and experimental routing
+### SDK capability mapping and route verification
 
 The pinned [`v7_1.upack_packaging` SDK](https://github.com/microsoft/azure-devops-python-api/tree/86c9a559fc4ab309df21e674b236a542f9e77f89/azure-devops/azure/devops/v7_1/upack_packaging)
 contains three operations and five models. This checkout covers that narrow
@@ -578,10 +588,14 @@ that shared location and this library's existing exact-version route, the new
 versionless GET uses
 `/{project?}/_packaging/{feed}/upack/packages/{name}/versions`, without a final
 version segment. The registration PUT uses that same route **with** the exact
-version segment, as the metadata GET does. These are **inferred routes**, not
-live-discovered/verified location templates. No alternative endpoint is tried on
-failure. Live Azure DevOps compatibility, including collection completeness and
-registration success/conflict semantics, remains an explicit experimental gate.
+version segment, as the metadata GET does. These routes were derived from the
+pinned SDK location. Exact and versionless metadata GETs have now been verified
+against independent live REST responses in organization/project scopes with
+name/ID addressing, including descriptions and the server's collection count.
+No alternative endpoint is tried on failure. Public `add_package` acknowledgment,
+exact metadata readback, and immutable-version conflict behavior have also been
+exercised on a project-scoped feed. Organization-scoped registration remains
+outside that live coverage.
 
 ## Compare a local file before uploading
 
@@ -678,8 +692,11 @@ Traversed malformed/missing/corrupt metadata raises, never `match` or absence.
 `match` verifies represented content, not current payload availability or
 historical upload provenance. Catalog absence does not ensure publishability:
 deleted versions stay reserved and concurrent publishers can race.
-The algorithm follows the existing decoder and mock fixtures; **live Azure
-single-chunk and multi-level package interoperability remains unverified**.
+Live raw-chunk, empty-file, multi-chunk and multi-level file comparisons have been checked
+against independently hash-verified manifest/node metadata and approved local
+controls, without remote payload reads. On Windows, cross-API opening checks
+account for executable-extension mode hints in path stat that descriptor stat
+does not expose; full per-API mutation checks remain in place.
 Use [publishing](#publish-a-package) to upload a directory, or
 [registration](#register-already-uploaded-content) for pre-uploaded references.
 
@@ -803,9 +820,11 @@ requests for **every selected version**, including those without the path. It
 never searches every feed/package, infers renames, detects content changes, or
 provides a snapshot across concurrent catalog changes. Files are not independently
 versioned: history associates the same relative path with package versions.
-Use explicit versions to bound the work. **Live inspection interoperability is
-unverified**, including service-produced raw/chunked manifests and inaccessible
-or deleted resources; fixture tests are not compatibility evidence.
+Use explicit versions to bound the work. Live inspection and bounded history
+cover raw and chunked manifests, with independently captured REST/node data and
+ArtifactTool file controls. Independently known inaccessible/deleted resources
+exercise access-error propagation and deletion semantics without confusing
+arbitrary missing-resource responses with known permission failures.
 
 ## Register already-uploaded content
 
@@ -905,8 +924,10 @@ checks cannot authorize reuse or avoid races. After an uncertain outcome, stop
 automatic processing and explicitly inspect the intended package's metadata
 before deciding how to reconcile. Do not turn a subsequent 409 into success or
 automatically delete/recreate a version. Neither a catalog miss nor one matching
-file proves a registration succeeded. The PUT route and live response behavior
-remain experimental; fixture success is not service interoperability evidence.
+file proves a registration succeeded. Project-scoped registration acknowledgment,
+exact readback, and a separately approved conflict followed by unchanged readback
+have been exercised live. This does not establish organization-scoped write
+compatibility or live coverage of every error outcome.
 
 ## Azure CLI comparison and unsupported behavior
 
@@ -1024,8 +1045,10 @@ coordinated with [issue #2](https://github.com/cataggar/az-artifacts/issues/2).
 Do not extend the read-only smoke above to upload, register, retry, or delete
 anything automatically. Verify the service location template and actual
 acknowledgment/conflict/error responses before claiming compatibility.
-No live registration or read-only smoke evidence is claimed here; the complete
-local implementation and fixture coverage do not remove these release gates.
+The separately gated harness covers project-scoped acknowledgment/conflict and
+read-only discovery and inspection against independent fixtures, including full
+feed enumeration and known inaccessible/deleted-resource cases. Previous
+successful runs do not authorize another write or make substituted fixtures valid.
 
 ## Releasing the Python distribution to PyPI
 

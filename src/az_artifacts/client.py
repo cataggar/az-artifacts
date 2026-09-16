@@ -217,18 +217,35 @@ class UniversalPackageClient:
             raise ProtocolError("ResourceAreas did not advertise a dedup service")
         return blob_url
 
-    def list_feeds(self, *, project: str | None = None) -> tuple[Feed, ...]:
+    def list_feeds(
+        self, *, project: str | None = None, max_response_bytes: int = 64 * 1024 * 1024
+    ) -> tuple[Feed, ...]:
         """List all accessible organization feeds, optionally filtered by project.
 
         ``project`` is an optional project name or ID, not the feed's inferred
         scope: each returned Feed.project preserves the service association.
         Returns a tuple in service order. Requires an open client, not Dedup;
         no blobs or files are accessed. Service/protocol failures propagate.
+
+        Optional URL expansion and deleted-upstream details are not requested;
+        all public Feed fields are retained. This endpoint has no pagination.
+        ``max_response_bytes`` is a positive integer (not bool) bounding this
+        complete decoded response, defaulting to 64 MiB. Larger responses raise
+        ProtocolError without returning a partial feed list. Other API limits
+        are unchanged.
         """
         self._ensure_open()
         if project is not None:
             _identifier(project, "project")
-        return _catalog.list_feeds(self._http, self._feeds_url(), project)
+        if (
+            isinstance(max_response_bytes, bool)
+            or not isinstance(max_response_bytes, int)
+            or max_response_bytes <= 0
+        ):
+            raise ValueError("max_response_bytes must be a positive integer")
+        return _catalog.list_feeds(
+            self._http, self._feeds_url(), project, max_bytes=max_response_bytes
+        )
 
     def list_packages(
         self,
@@ -419,8 +436,9 @@ class UniversalPackageClient:
         name or ID, which must otherwise be omitted. Entries retain service order,
         including prereleases. Requires an open client, but not a Dedup service;
         no blobs or files are read or written. Unsupported continuation/partial
-        responses raise ProtocolError. The versionless route is experimental and
-        has not been verified against a live service.
+        responses raise ProtocolError. The versionless route has been verified
+        against independent live REST baselines in both feed scopes, using names
+        and IDs. Unsupported or incomplete service responses still fail explicitly.
         """
         self._validate_package(feed, name)
         _validate_scope(scope, project)
@@ -470,7 +488,8 @@ class UniversalPackageClient:
         reconciliation occurs: explicitly verify intended metadata after an
         unknown outcome, and never interpret a later 409 as success. Callers and
         custom transports must not replay the PUT automatically either.
-        This SDK-location-derived route remains experimental and live-unverified.
+        Acknowledgment and conflict behavior have been exercised live for a
+        project-scoped feed; organization-scoped registration remains unverified.
         """
         self._validate_package(feed, name)
         _validate_scope(scope, project)

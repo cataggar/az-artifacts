@@ -39,6 +39,13 @@ def _unchanged(before: os.stat_result, after: os.stat_result) -> None:
         raise LocalFileChangedError("Local source changed or was replaced during comparison")
 
 
+def _open_fingerprint(value: os.stat_result) -> tuple[int, int, int, int, int]:
+    # Windows path stat infers execute bits from extensions such as .exe;
+    # descriptor stat does not. ctime can also have different meanings.
+    mode = value.st_mode & ~0o111 if os.name == "nt" else value.st_mode
+    return value.st_dev, value.st_ino, mode, value.st_size, value.st_mtime_ns
+
+
 def _nonblocking_open(path: str, flags: int) -> int:
     # The pre-open stat rejects special files; O_NONBLOCK also prevents a raced
     # replacement with a POSIX FIFO from blocking before the descriptor check.
@@ -59,9 +66,8 @@ def open_local(path: Path) -> Iterator[tuple[BinaryIO, int]]:
         raise ValueError("local_path must refer to a regular file")
     with open(path, "rb", buffering=0, opener=_nonblocking_open) as stream:
         opened = os.fstat(stream.fileno())
-        # Windows stat/fstat can expose different ctime meanings. Compare that
-        # field only within each API, retaining both independent baselines.
-        if _fingerprint(before)[:-1] != _fingerprint(opened)[:-1]:
+        # Retain full independent fingerprints for the post-read checks below.
+        if _open_fingerprint(before) != _open_fingerprint(opened):
             raise LocalFileChangedError("Local source changed or was replaced while opening")
         yield stream, before.st_size
         _unchanged(opened, os.fstat(stream.fileno()))
