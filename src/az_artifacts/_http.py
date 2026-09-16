@@ -24,6 +24,7 @@ from .errors import (
 _RETRY_STATUSES = {429, 500, 502, 503, 504}
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 _API_ACCEPT = "application/json; api-version=7.1-preview.1"
+_USER_AGENT = "az-artifacts/0.2.0"
 
 
 def validate_url(url: str, *, authenticated: bool = False) -> None:
@@ -93,13 +94,13 @@ class Http:
             timeout=timeout,
             transport=transport,
             follow_redirects=False,
-            headers={"User-Agent": "az-artifacts/0.1.0", "Accept-Encoding": "identity"},
+            headers={"User-Agent": _USER_AGENT, "Accept-Encoding": "identity"},
         )
         self._blob_client = httpx.Client(
             timeout=timeout,
             transport=transport,
             follow_redirects=False,
-            headers={"User-Agent": "az-artifacts/0.1.0", "Accept-Encoding": "identity"},
+            headers={"User-Agent": _USER_AGENT, "Accept-Encoding": "identity"},
         )
 
     def close(self) -> None:

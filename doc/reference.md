@@ -6,9 +6,8 @@ This reference covers publishing, downloading, discovery, metadata, file
 inspection/comparison, registration, and maintenance. Examples and development
 commands run from the repository root.
 
-The published PyPI 0.1.0 release is download-only. Other APIs described here
-require a current checkout until a new release. The library targets Azure DevOps
-Services, not Azure DevOps Server, and has no command-line entry point.
+The library targets Azure DevOps Services, not Azure DevOps Server, and has no
+command-line entry point.
 
 ## Contents
 
@@ -177,16 +176,15 @@ Always compare downloaded files with the reviewed package hashes.
 
 ## Installation
 
-Requires Python **3.11 or newer**. The runtime dependencies are `httpx` and `wcmatch`.
+The runtime dependencies are `httpx` and `wcmatch`.
 
-For the released **download-only 0.1.0**, install from
-[PyPI](https://pypi.org/project/az-artifacts/):
+Install from [PyPI](https://pypi.org/project/az-artifacts/):
 
 ```bash
 uv add az-artifacts
 ```
 
-For the new APIs in this reference, work from a current checkout instead:
+To work from a source checkout:
 
 ```bash
 uv sync --locked --group dev
@@ -956,12 +954,12 @@ uv build
 ```
 
 Normal tests use local fixtures and mocked HTTP, without live credentials.
-[CI](../.github/workflows/ci.yml) targets Python 3.11-3.14 on Linux and Python 3.14
-on Windows/macOS. Lint, formatting, type checking, and distribution building run
-once, on Linux/Python 3.14. CI builds a wheel and source distribution, installs
+[CI](../.github/workflows/ci.yml) covers supported Python interpreters on Linux,
+Windows, and macOS. Lint, formatting, type checking, and distribution building run
+once, on Linux. CI builds a wheel and source distribution, installs
 each into a separate clean environment, and checks imports without relying on
-the source checkout. Actions are pinned to reviewed commits; `ghr` v0.8.0 installs
-uv 0.12.15 with release verification enabled.
+the source checkout. Actions are pinned to reviewed commits; `ghr` installs
+the pinned uv release with verification enabled.
 
 ### Optional live download smoke check
 
@@ -1033,16 +1031,15 @@ local implementation and fixture coverage do not remove these release gates.
 
 [The release workflow](../.github/workflows/pypi.yml) runs only on pushed `v*` tags.
 It checks out the exact triggering commit, reads the static version from
-`pyproject.toml` with `tomllib`, and requires an exact match such as
-`v0.1.0` -> `0.1.0`. It runs tests, lint, formatting, and type checking before
+`pyproject.toml` with `tomllib`, and requires the tag to match `v<project-version>`.
+It runs tests, lint, formatting, and type checking before
 building and smoke-installing the wheel and source distribution. A separate
 publish job downloads those build artifacts and uses OIDC Trusted Publishing
 inside the `pypi` environment. There are no PyPI password/API-token secrets.
 
 **Maintainer checklist for subsequent releases or a fork:**
 
-1. PyPI `az-artifacts` 0.1.0 is already released (download-only). Choose a new
-   version for any later release; do not reuse `v0.1.0`. Forks need their own
+1. Choose a new, unused package version for each release. Forks need their own
    available distribution name and PyPI project or pending Trusted Publisher.
 2. Verify the GitHub Trusted Publisher on PyPI with owner `cataggar`,
    repository `az-artifacts`, workflow filename **`pypi.yml`**, and environment
@@ -1053,8 +1050,8 @@ inside the `pypi` environment. There are no PyPI password/API-token secrets.
    requires it. Merely naming an environment in YAML does not configure these
    protection rules. Protect release-tag creation through repository rules
    as appropriate.
-4. Commit the intended version, lockfile, and tested changes, then create/push
-   the matching `v<version>` tag when ready to release. If required reviewers
+4. Merge the intended version, lockfile, and tested changes, then create/push
+   the matching `v<version>` tag from the merged commit when ready to release. If required reviewers
    are configured, approve the publish job only after reviewing its source
    and build results. Build artifacts are retained for 14 days, so any required
    approvals must occur before they expire.

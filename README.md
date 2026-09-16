@@ -6,14 +6,11 @@ No Azure CLI or ArtifactTool runtime dependency.
 
 ## Installation
 
-Requires Python 3.11 or newer.
-
 ```bash
 uv add az-artifacts
 ```
 
-PyPI 0.1.0 supports downloads. Publishing and the additional APIs require a
-current checkout until the next release; see [source installation](doc/reference.md#installation).
+For development from a checkout, see [source installation](doc/reference.md#installation).
 
 ## Quick start
 
