@@ -66,7 +66,7 @@ class Response:
     def request_id(self) -> str | None:
         for name in ("x-vss-e2eid", "x-ms-request-id"):
             value = self.headers.get(name)
-            if value is not None and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", value):
+            if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", value):
                 return value
         return None
 
