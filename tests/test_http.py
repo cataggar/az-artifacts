@@ -1,5 +1,7 @@
+import tomllib
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
+from pathlib import Path
 
 import httpx
 import pytest
@@ -22,6 +24,22 @@ BLOB = "https://blob.example/content?sig=do-not-print"
 
 def make_http(handler, credential="secret", retries=0):
     return Http(credential, timeout=1, retries=retries, transport=httpx.MockTransport(handler))
+
+
+@pytest.mark.parametrize("authenticated", [True, False])
+def test_user_agent_matches_project_version(authenticated):
+    project = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    version = tomllib.loads(project.read_text(encoding="utf-8"))["project"]["version"]
+
+    def handler(request):
+        assert request.headers["user-agent"] == f"az-artifacts/{version}"
+        return httpx.Response(200)
+
+    http = make_http(handler)
+    try:
+        http.request("GET", API if authenticated else BLOB, authenticated=authenticated)
+    finally:
+        http.close()
 
 
 def test_credentials_and_cookies_not_sent_to_signed_urls():

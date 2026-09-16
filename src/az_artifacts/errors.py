@@ -68,7 +68,7 @@ class LocalFileChangedError(ArtifactsError):
 
 
 class UnsafePathError(ArtifactsError):
-    """A logical package path is invalid or cannot safely be written locally."""
+    """A package path or filesystem entry is unsafe for the requested operation."""
 
 
 class NoMatchingFilesError(ArtifactsError):
@@ -81,3 +81,15 @@ class VersionNotFoundError(ArtifactsError):
 
 class PackageNotFoundError(ArtifactsError):
     """Successful catalog enumeration found no visible package with the exact name."""
+
+
+class PackageConflictError(ConflictError):
+    """The immutable package version already exists; it was not overwritten."""
+
+
+class IncompleteUploadError(ArtifactsError):
+    """Content or retention was not completed; registration was not attempted."""
+
+
+class AmbiguousPublishError(ArtifactsError):
+    """Registration was attempted, but its outcome could not be confirmed."""

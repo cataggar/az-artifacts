@@ -2,7 +2,7 @@
 
 from base64 import b64encode
 from dataclasses import dataclass, field
-from typing import Protocol, TypeAlias
+from typing import Protocol
 
 ADO_SCOPE = "499b84ac-1321-427f-aa17-267ca6975798/.default"
 
@@ -26,7 +26,7 @@ class BearerToken:
         _validate_token(self.token)
 
 
-Credential: TypeAlias = str | BearerToken | TokenCredential
+type Credential = str | BearerToken | TokenCredential
 
 
 def _validate_token(token: str) -> None:

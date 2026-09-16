@@ -1,0 +1,3 @@
+tests/fixtures/publishing/smoke/hello.txt -text whitespace=cr-at-eol
+tests/fixtures/publishing/*-manifest.json -text
+tests/fixtures/publishing/*.bin -text

@@ -23,8 +23,8 @@ _WINDOWS_RESERVED = {
 }
 
 
-def relative_path(path: str) -> PurePosixPath:
-    """Normalize a manifest path, allowing its optional single leading slash."""
+def relative_path(path: str, *, portable: bool = False) -> PurePosixPath:
+    """Normalize a manifest path, optionally enforcing portable publishing names."""
     normalized = path.removeprefix("/")
     parts = normalized.split("/")
     if (
@@ -34,7 +34,10 @@ def relative_path(path: str) -> PurePosixPath:
         or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in normalized)
     ):
         raise UnsafePathError(f"Invalid manifest path: {path!r}")
-    return PurePosixPath(*parts)
+    result = PurePosixPath(*parts)
+    if portable:
+        _validate_destination_path(result, portable=True)
+    return result
 
 
 def package_path(path: str | PurePosixPath) -> PurePosixPath:
@@ -66,11 +69,11 @@ def manifest_files(items: tuple[ManifestItem, ...]) -> tuple[PackageFile, ...]:
     return files
 
 
-def _validate_destination_path(path: PurePosixPath) -> None:
+def _validate_destination_path(path: PurePosixPath, *, portable: bool = False) -> None:
     # Preserve download's colon restriction on every host, including POSIX.
     if ":" in path.as_posix():
         raise UnsafePathError(f"Invalid manifest destination: {path!s}")
-    if os.name == "nt" and any(
+    if (portable or os.name == "nt") and any(
         part.endswith((".", " "))
         or part.split(".")[0].upper() in _WINDOWS_RESERVED
         or any(char in part for char in '<>"|?*')

@@ -1,15 +1,18 @@
-"""Native discovery, inspection, download, and registration for Universal Packages."""
+"""Native discovery, metadata, inspection, downloads, and publishing for Universal Packages."""
 
 from .auth import BearerToken as BearerToken
 from .auth import TokenCredential as TokenCredential
 from .client import UniversalPackageClient as UniversalPackageClient
+from .errors import AmbiguousPublishError as AmbiguousPublishError
 from .errors import ArtifactsError as ArtifactsError
 from .errors import AuthenticationError as AuthenticationError
 from .errors import ConflictError as ConflictError
+from .errors import IncompleteUploadError as IncompleteUploadError
 from .errors import IntegrityError as IntegrityError
 from .errors import LocalFileChangedError as LocalFileChangedError
 from .errors import NoMatchingFilesError as NoMatchingFilesError
 from .errors import NotFoundError as NotFoundError
+from .errors import PackageConflictError as PackageConflictError
 from .errors import PackageNotFoundError as PackageNotFoundError
 from .errors import PermissionDeniedError as PermissionDeniedError
 from .errors import ProtocolError as ProtocolError
@@ -31,4 +34,6 @@ from .models import PackagePushMetadata as PackagePushMetadata
 from .models import PackageVersion as PackageVersion
 from .models import PackageVersionDeletionState as PackageVersionDeletionState
 from .models import ProjectReference as ProjectReference
+from .models import PublishRequest as PublishRequest
+from .models import PublishResult as PublishResult
 from .models import Scope as Scope

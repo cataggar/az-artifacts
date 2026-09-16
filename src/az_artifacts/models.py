@@ -1,4 +1,4 @@
-"""Typed catalog summaries, registration metadata, inspection, and download results."""
+"""Typed catalog, metadata, inspection, download, and publishing requests/results."""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -194,6 +194,25 @@ class DownloadResult:
     path: Path
     files: tuple[Path, ...]
     bytes_downloaded: int
+
+
+@dataclass(frozen=True)
+class PublishRequest:
+    feed: str
+    name: str
+    version: str
+    path: str | Path
+    scope: Scope = "organization"
+    project: str | None = None
+    description: str | None = None
+
+
+@dataclass(frozen=True)
+class PublishResult:
+    metadata: PackageMetadata
+    path: Path
+    files: tuple[Path, ...]
+    bytes_uploaded: int
 
 
 @dataclass(frozen=True)

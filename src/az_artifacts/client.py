@@ -1,13 +1,14 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-"""Universal Package discovery, inspection, download, and registration client."""
+"""Universal Package discovery, metadata, inspection, download, and publishing client."""
 
 import math
 from collections.abc import Iterator, Sequence
 from pathlib import Path, PurePosixPath
 from types import TracebackType
 from urllib.parse import quote, unquote, urlsplit
+from uuid import UUID
 
 import httpx
 
@@ -16,7 +17,9 @@ from ._dedup import BlobReader
 from ._download import Downloader
 from ._http import Http, endpoint, validate_url
 from ._paths import filter_files, package_path, validate_file_filter
-from ._versions import resolve_version, validate_name, version_pattern
+from ._prepare import PreparedPackage
+from ._publish import publish
+from ._versions import resolve_version, validate_name, version_number, version_pattern
 from .auth import BearerToken, Credential, _validate_token
 from .errors import (
     PackageNotFoundError,
@@ -36,6 +39,8 @@ from .models import (
     PackageMetadata,
     PackagePushMetadata,
     PackageVersion,
+    PublishRequest,
+    PublishResult,
     Scope,
 )
 
@@ -82,11 +87,11 @@ def _organization_url(organization: str) -> tuple[str, str]:
 
 
 class UniversalPackageClient:
-    """Discover, inspect, download, and register already-uploaded packages.
+    """Discover, inspect, download, register, and publish Universal Packages.
 
     Pass a PAT string, a :class:`BearerToken`, or an Azure ``TokenCredential``.
     Use a context manager or call :meth:`close` to release HTTP connections.
-    No Azure CLI or ArtifactTool dependency; content uploading is not provided.
+    No Azure CLI or ArtifactTool dependency, including for content uploading.
     """
 
     def __init__(
@@ -121,6 +126,7 @@ class UniversalPackageClient:
         self._max_manifest_bytes = max_manifest_bytes
         self._services: dict[str, str] | None = None
         self._service_ids: dict[str, str] = {}
+        self._upload_url: str | None = None
         self._closed = False
 
     def __enter__(self) -> "UniversalPackageClient":
@@ -155,15 +161,25 @@ class UniversalPackageClient:
                 area = _json.as_object(value, "resource area")
                 name = _json.string(area.get("name"), "resource area name").lower()
                 location = _json.string(area.get("locationUrl"), "resource area location")
-                validate_url(location)
-                if urlsplit(location).query:
-                    raise ProtocolError("Resource area location must not contain a query string")
-                services[name] = location.rstrip("/")
                 area_id = area.get("id")
                 if area_id is not None:
-                    service_ids[_json.string(area_id, "resource area ID").lower()] = (
-                        location.rstrip("/")
-                    )
+                    area_id = _json.string(area_id, "resource area ID").lower()
+                # Unrelated resource areas can advertise ports this client never uses.
+                if name in (
+                    "dedup",
+                    "packaging",
+                    "packagingapi",
+                    "upackpackaging",
+                    "feed",
+                ) or area_id in (_UPACK_RESOURCE_AREA, _FEED_RESOURCE_AREA):
+                    validate_url(location, authenticated=True)
+                    if urlsplit(location).query:
+                        raise ProtocolError(
+                            "Resource area location must not contain a query string"
+                        )
+                services[name] = location.rstrip("/")
+                if area_id is not None:
+                    service_ids[area_id] = location.rstrip("/")
             self._services = services
             self._service_ids = service_ids
         return dict(self._services)
@@ -182,6 +198,7 @@ class UniversalPackageClient:
         return (
             self._service_ids.get(_UPACK_RESOURCE_AREA)
             or services.get("upackpackaging")
+            or services.get("packagingapi")
             or services.get("packaging")
             or endpoint("https://pkgs.dev.azure.com", self._organization_name)
         )
@@ -682,6 +699,60 @@ class UniversalPackageClient:
                     self._ensure_open()
 
         return iterate()
+
+    def _upload_location(self, blob_url: str) -> str:
+        if self._upload_url is None:
+            response = self._http.request(
+                "GET",
+                endpoint(self.organization, "_apis", "connectionData"),
+                params={"connectOptions": "0"},
+            )
+            obj = _json.as_object(response.json(), "organization connection data")
+            try:
+                identifier = str(
+                    UUID(_json.string(obj.get("instanceId"), "organization instance ID"))
+                )
+            except ValueError:
+                raise ProtocolError("Invalid organization instance ID") from None
+            account = "A" + identifier
+            self._upload_url = (
+                blob_url
+                if blob_url.lower().endswith("/" + account.lower())
+                else endpoint(blob_url, account)
+            )
+        return self._upload_url
+
+    def publish(self, request: PublishRequest) -> PublishResult:
+        """Publish an immutable exact version from a quiescent regular-file tree.
+
+        No registration is attempted until all content and retention are complete.
+        A registration request is never automatically repeated.
+        """
+        self._ensure_open()
+        if not isinstance(request, PublishRequest):
+            raise TypeError("publish requires a PublishRequest")
+        if not isinstance(request.name, str) or not isinstance(request.version, str):
+            raise ValueError("Package name and version must be strings")
+        self._validate_package(request.feed, request.name)
+        number = version_number(request.version)
+        if number is None or any(component > 2147483647 for component in number):
+            raise ValueError("Publishing requires exact lowercase SemVer with 32-bit components")
+        _validate_scope(request.scope, request.project)
+        if request.description is not None and not isinstance(request.description, str):
+            raise ValueError("description must be a string or None")
+        prepared = PreparedPackage(
+            Path(request.path), request.version, max_bytes=self._max_manifest_bytes
+        )
+        package_url = self._upack_url(request.feed, request.name, request.project, request.version)
+        blob_url = self._upload_location(self._blob_url())
+        return publish(
+            self._http,
+            package_url,
+            blob_url,
+            request,
+            prepared,
+            max_workers=self._max_workers,
+        )
 
     def download(
         self,

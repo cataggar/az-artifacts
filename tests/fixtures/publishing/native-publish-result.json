@@ -1,0 +1,47 @@
+{
+  "native_publish": "confirmed",
+  "metadata": {
+    "version": "0.0.3-native.20000101",
+    "manifest_id": "0B268CAC637D48AB46820709EEB4FE7B994F1FBD1CE27FDAD8AA3E8625AF681101",
+    "super_root_id": "EBE7281DBB72C29DE1DC8FFC12B627B730C911900960B36C389E692FC219825F02",
+    "package_size": 104989099
+  },
+  "bytes_uploaded": 104957027,
+  "native_download": "all approved sizes and SHA256 hashes verified",
+  "artifacttool_download": "all approved sizes and SHA256 hashes verified",
+  "files": [
+    {
+      "path": "payload.bin",
+      "size": 104857600,
+      "sha256": "514dd8bcb18fa0afb5b93eaffa7a636cf943e54638ae7b56c2a10b03481b14f5"
+    },
+    {
+      "path": "empty.txt",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "nested/repeated.bin",
+      "size": 131072,
+      "sha256": "fa43239bcee7b97ca62f007cc68487560a39e19f74f3dde7486db3f98df8e471"
+    }
+  ],
+  "transfer": {
+    "registration_attempts": 1,
+    "successful_chunk_requests": 23,
+    "successful_chunk_body_bytes": 104858027,
+    "uploaded_chunk_count": 1368,
+    "unique_uploaded_chunks": 1368,
+    "uploaded_chunks_requested_missing": 1368,
+    "node_request_body_bytes": 99000,
+    "statuses": {
+      "api-read:200": 2,
+      "metadata:404": 1,
+      "node-put:409": 5,
+      "chunks-put:200": 23,
+      "node-put:200": 5,
+      "registration:204": 1,
+      "metadata:200": 1
+    }
+  }
+}

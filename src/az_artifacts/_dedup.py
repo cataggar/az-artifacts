@@ -4,8 +4,9 @@
 """Dedup blob reading based on azure-devops-rust-api and BuildXL's node format."""
 
 import hashlib
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from collections.abc import Iterator, Sequence
+from concurrent.futures import Executor, Future
 from threading import Lock
 
 from . import _json
@@ -25,6 +26,22 @@ _EMPTY_CHUNK_ID = hashlib.sha512(b"").digest()[:32].hex().upper() + "01"
 def content_hash(data: bytes) -> str:
     """Dedup uses ordinary SHA-512 truncated to 32 bytes, not SHA-512/256."""
     return hashlib.sha512(data).digest()[:32].hex().upper()
+
+
+def serialize_node(children: Sequence[BlobRef]) -> bytes:
+    if not 1 <= len(children) <= 512:
+        raise ValueError("Dedup nodes require 1 through 512 children")
+    data = bytearray(b"\0\0" + (len(children) - 1).to_bytes(2, "little"))
+    for child in children:
+        identifier = _json.blob_id(child.id)
+        node = identifier.endswith("02")
+        width = 7 if node else 3
+        if not 0 <= child.size < 1 << (width * 8):
+            raise ValueError("Dedup child size cannot be represented")
+        data.append(int(node))
+        data.extend(child.size.to_bytes(width, "little"))
+        data.extend(bytes.fromhex(identifier[:64]))
+    return bytes(data)
 
 
 def parse_node(data: bytes) -> tuple[BlobRef, ...]:
@@ -114,6 +131,7 @@ class BlobReader:
                     endpoint(self._blob_url, "_apis", "dedup", "urls"),
                     params={"allowEdge": "true"},
                     json_body=batch,
+                    retry_safe=True,
                     headers={
                         "Content-Type": "application/json; charset=utf-8; api-version=1.0-preview",
                         "Accept": "application/json; api-version=1.0",
@@ -176,29 +194,47 @@ class BlobReader:
         """
         return self._leaf_refs(_validate_ref(ref), frozenset())
 
-    def _leaf_refs(self, ref: BlobRef, ancestors: frozenset[str]) -> Iterator[BlobRef]:
+    def _leaf_refs(
+        self, ref: BlobRef, ancestors: frozenset[str], *, resolve_urls: bool = False
+    ) -> Iterator[BlobRef]:
         _check_tree(ref, ancestors)
         if ref.id.endswith("01"):
             yield ref
             return
-        for child in self._node(ref.id, size=ref.size):
-            yield from self._leaf_refs(_validate_ref(child), ancestors | {ref.id})
+        children = self._node(ref.id, size=ref.size)
+        if resolve_urls:
+            self.resolve([child.id for child in children if child.id != _EMPTY_CHUNK_ID])
+        for child in children:
+            yield from self._leaf_refs(
+                _validate_ref(child), ancestors | {ref.id}, resolve_urls=resolve_urls
+            )
 
     def content(
         self,
         ref: BlobRef,
         *,
         ancestors: frozenset[str] = frozenset(),
+        executor: Executor | None = None,
+        prefetch: int = 1,
     ) -> Iterator[bytes]:
-        ref = _validate_ref(ref)
-        _check_tree(ref, ancestors)
-        if ref.id.endswith("01"):
-            yield self.blob(ref.id, size=ref.size, limit=MAX_CHUNK_BYTES)
+        children = self._leaf_refs(_validate_ref(ref), ancestors, resolve_urls=True)
+        if executor is None:
+            for child in children:
+                yield self.blob(child.id, size=child.size, limit=MAX_CHUNK_BYTES)
             return
-        children = self._node(ref.id, size=ref.size)
-        self.resolve([child.id for child in children if child.id != _EMPTY_CHUNK_ID])
-        for child in children:
-            yield from self.content(child, ancestors=ancestors | {ref.id})
+        pending: deque[Future[bytes]] = deque()
+        try:
+            for child in children:
+                pending.append(
+                    executor.submit(self.blob, child.id, size=child.size, limit=MAX_CHUNK_BYTES)
+                )
+                if len(pending) >= prefetch:
+                    yield pending.popleft().result()
+            while pending:
+                yield pending.popleft().result()
+        finally:
+            for future in pending:
+                future.cancel()
 
     def manifest(self, identifier: str, *, limit: int) -> bytes:
         identifier = _json.blob_id(identifier)
