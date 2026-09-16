@@ -1,10 +1,11 @@
-"""Native Python discovery, inspection, and downloads for Azure DevOps Universal Packages."""
+"""Native discovery, inspection, download, and registration for Universal Packages."""
 
 from .auth import BearerToken as BearerToken
 from .auth import TokenCredential as TokenCredential
 from .client import UniversalPackageClient as UniversalPackageClient
 from .errors import ArtifactsError as ArtifactsError
 from .errors import AuthenticationError as AuthenticationError
+from .errors import ConflictError as ConflictError
 from .errors import IntegrityError as IntegrityError
 from .errors import LocalFileChangedError as LocalFileChangedError
 from .errors import NoMatchingFilesError as NoMatchingFilesError
@@ -12,6 +13,7 @@ from .errors import NotFoundError as NotFoundError
 from .errors import PackageNotFoundError as PackageNotFoundError
 from .errors import PermissionDeniedError as PermissionDeniedError
 from .errors import ProtocolError as ProtocolError
+from .errors import RegistrationOutcomeUnknownError as RegistrationOutcomeUnknownError
 from .errors import ServiceError as ServiceError
 from .errors import TransportError as TransportError
 from .errors import UnsafePathError as UnsafePathError

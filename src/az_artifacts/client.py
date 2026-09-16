@@ -1,7 +1,7 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-"""Universal Package discovery, inspection, download, and metadata client."""
+"""Universal Package discovery, inspection, download, and registration client."""
 
 import math
 from collections.abc import Iterator, Sequence
@@ -18,7 +18,13 @@ from ._http import Http, endpoint, validate_url
 from ._paths import filter_files, package_path, validate_file_filter
 from ._versions import resolve_version, validate_name, version_pattern
 from .auth import BearerToken, Credential, _validate_token
-from .errors import PackageNotFoundError, ProtocolError
+from .errors import (
+    PackageNotFoundError,
+    ProtocolError,
+    RegistrationOutcomeUnknownError,
+    ServiceError,
+    TransportError,
+)
 from .models import (
     DownloadResult,
     Feed,
@@ -28,6 +34,7 @@ from .models import (
     Package,
     PackageFile,
     PackageMetadata,
+    PackagePushMetadata,
     PackageVersion,
     Scope,
 )
@@ -75,10 +82,11 @@ def _organization_url(organization: str) -> tuple[str, str]:
 
 
 class UniversalPackageClient:
-    """Discover, inspect, and download packages without Azure CLI or ArtifactTool.
+    """Discover, inspect, download, and register already-uploaded packages.
 
     Pass a PAT string, a :class:`BearerToken`, or an Azure ``TokenCredential``.
     Use a context manager or call :meth:`close` to release HTTP connections.
+    No Azure CLI or ArtifactTool dependency; content uploading is not provided.
     """
 
     def __init__(
@@ -403,6 +411,85 @@ class UniversalPackageClient:
         if response.status == 206 or response.headers.get("x-ms-continuationtoken"):
             raise ProtocolError("Limited package metadata returned a partial or continued response")
         return _json.limited_package_metadata_list_response(response.json())
+
+    def add_package(
+        self,
+        *,
+        feed: str,
+        name: str,
+        version: str,
+        metadata: PackagePushMetadata,
+        scope: Scope = "organization",
+        project: str | None = None,
+    ) -> None:
+        """Register pre-uploaded content; this is NOT a file-upload/publish workflow.
+
+        ``feed`` is a feed name or ID; ``name`` an exact Universal Package name.
+        ``version`` must be exact SemVer (prereleases allowed, no wildcards).
+        ``scope`` defaults to organization; project scope requires a ``project``
+        name or ID, which must otherwise be omitted. Requires an open client and
+        Packaging write/publish permission, not merely read access.
+
+        ``metadata`` must be PackagePushMetadata referencing existing uploaded
+        content and suitable proofs. Manifest/super-root IDs must be supported
+        64-hex-digit IDs with 01/02 suffixes; serialization canonicalizes them to
+        uppercase. Proofs must be a tuple of opaque strings: order, duplicates,
+        empty strings and an empty tuple are preserved, not proof-validated.
+        Description None is omitted; "" is sent unchanged. Invalid caller data
+        raises ValueError/TypeError before any request; inputs are never mutated.
+        No Dedup discovery, blob access, local I/O, proof generation, or overwrite.
+
+        Returns None only for HTTP 200/201/204 with no asynchronous/partial
+        response headers (Azure-AsyncOperation, Operation-Location, Content-Range,
+        x-ms-continuationtoken). The bounded body is ignored, as in the SDK.
+        The PUT is never automatically retried, regardless of client retries.
+        HTTP 409 raises ConflictError; other 4xx except 408 retain ServiceError
+        types, including 401/403/404/429. HTTP 408, 5xx, other unacknowledged
+        responses, and transport/response-protocol failures after starting the
+        PUT raise RegistrationOutcomeUnknownError: the version may have committed.
+        Discovery failures propagate normally before registration is attempted.
+
+        Versions are immutable/reserved even after deletion. No automatic
+        reconciliation occurs: explicitly verify intended metadata after an
+        unknown outcome, and never interpret a later 409 as success. Callers and
+        custom transports must not replay the PUT automatically either.
+        This SDK-location-derived route remains experimental and live-unverified.
+        """
+        self._validate_package(feed, name)
+        _validate_scope(scope, project)
+        if version_pattern(version) is not None:
+            raise ValueError("Registration requires an exact Universal Package version")
+        body = _json.serialize_package_push_metadata(metadata)
+        url = self._upack_url(feed, name, project, version)
+        validate_url(url, authenticated=True)
+        try:
+            response = self._http.request("PUT", url, json_body=body, retry=False)
+        except ServiceError as error:
+            if 400 <= error.status_code < 500 and error.status_code != 408:
+                raise
+            raise RegistrationOutcomeUnknownError(
+                "Package registration was not acknowledged; its outcome is unknown",
+                status_code=error.status_code,
+                request_id=error.request_id,
+            ) from error
+        except (TransportError, ProtocolError) as error:
+            raise RegistrationOutcomeUnknownError(
+                "Package registration could not be confirmed; its outcome is unknown"
+            ) from error
+        if response.status not in (200, 201, 204) or any(
+            response.headers.get(header)
+            for header in (
+                "azure-asyncoperation",
+                "operation-location",
+                "content-range",
+                "x-ms-continuationtoken",
+            )
+        ):
+            raise RegistrationOutcomeUnknownError(
+                "Package registration did not acknowledge synchronous completion",
+                status_code=response.status,
+                request_id=response.request_id,
+            )
 
     def _package_files(
         self, feed: str, name: str, version: str, project: str | None

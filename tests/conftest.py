@@ -42,6 +42,9 @@ class AzureService:
         self.versions_metadata = {"count": 1, "value": [{"version": self.version}]}
         self.versions_metadata_headers = {}
         self.versions_metadata_status = 200
+        self.registration_status = 204
+        self.registration_headers = {}
+        self.registration_body = b""
         self.package_pages = [[{"id": PACKAGE_ID, "name": "package"}]]
         self.feeds = [{"id": FEED_ID, "name": "feed"}]
         self.versions = ["1.2.3"]
@@ -100,8 +103,17 @@ class AzureService:
         if path.endswith("/_apis/ResourceAreas"):
             return httpx.Response(200, json={"value": self.services})
         if host == "pkgs.dev.azure.com" and "/_packaging/" in path:
-            assert request.method == "GET"
             assert request.headers["accept"] == "application/json; api-version=7.1-preview.1"
+            if request.method == "PUT":
+                assert "/upack/packages/" in path and path.rsplit("/", 2)[-2] == "versions"
+                assert not request.url.params
+                assert request.headers["content-type"] == "application/json"
+                return httpx.Response(
+                    self.registration_status,
+                    headers=self.registration_headers,
+                    content=self.registration_body,
+                )
+            assert request.method == "GET"
             if path.endswith("/versions"):
                 assert not request.url.params
                 return httpx.Response(

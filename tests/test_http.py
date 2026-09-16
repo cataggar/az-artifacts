@@ -8,6 +8,7 @@ from az_artifacts._http import Http
 from az_artifacts.auth import ADO_SCOPE, BearerToken
 from az_artifacts.errors import (
     AuthenticationError,
+    ConflictError,
     NotFoundError,
     PermissionDeniedError,
     ProtocolError,
@@ -79,6 +80,7 @@ def test_token_credential_refreshes_for_each_request():
         (401, AuthenticationError),
         (403, PermissionDeniedError),
         (404, NotFoundError),
+        (409, ConflictError),
         (400, ServiceError),
     ],
 )
@@ -223,3 +225,106 @@ def test_untrusted_authenticated_host():
             http.request("GET", "https://example.com/data")
     finally:
         http.close()
+
+
+@pytest.mark.parametrize("retry", [None, 0, 1, "false", [], {}])
+def test_retry_option_requires_boolean(retry):
+    http = make_http(lambda _: pytest.fail("request must not be sent"))
+    try:
+        with pytest.raises(TypeError, match="retry"):
+            http.request("PUT", API, retry=retry)
+    finally:
+        http.close()
+
+
+@pytest.mark.parametrize("method", ["GET", "POST", "PUT"])
+@pytest.mark.parametrize("failure", [429, 500, 502, 503, 504, "transport"])
+def test_operation_can_disable_all_retries(monkeypatch, method, failure):
+    requests = []
+    monkeypatch.setattr("az_artifacts._http.time.sleep", lambda _: pytest.fail("unexpected retry"))
+
+    def handler(request):
+        requests.append(request)
+        if failure == "transport":
+            raise httpx.ReadTimeout("private URL", request=request)
+        return httpx.Response(failure, headers={"retry-after": "0"})
+
+    http = make_http(handler, retries=4)
+    try:
+        with pytest.raises(TransportError if failure == "transport" else ServiceError):
+            http.request(method, API, retry=False)
+    finally:
+        http.close()
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize(
+    ("method", "url", "body"),
+    [
+        ("GET", API, None),
+        ("POST", "https://vsblob.dev.azure.com/org/_apis/dedup/urls", ["ab" * 32 + "01"]),
+    ],
+)
+@pytest.mark.parametrize("failure", [429, 500, 502, 503, 504, "transport"])
+def test_default_read_retries_including_url_resolution(monkeypatch, method, url, body, failure):
+    waits = []
+    requests = []
+    monkeypatch.setattr("az_artifacts._http.time.sleep", waits.append)
+
+    def handler(request):
+        requests.append(request)
+        if len(requests) == 1:
+            if failure == "transport":
+                raise httpx.ReadError("private URL", request=request)
+            return httpx.Response(failure)
+        return httpx.Response(200, json={})
+
+    http = make_http(handler, retries=1)
+    try:
+        assert http.request(method, url, json_body=body).status == 200
+    finally:
+        http.close()
+    assert waits == [1]
+    assert len(requests) == 2
+    assert requests[0].content == requests[1].content
+    assert all(request.method == method for request in requests)
+
+
+@pytest.mark.parametrize("value", ["private token", "https://private/?sig=secret", "x" * 129, "é"])
+def test_request_id_rejects_unsafe_or_unbounded_values(value):
+    http = make_http(lambda _: httpx.Response(409, headers={"x-vss-e2eid": value.encode("utf-8")}))
+    try:
+        with pytest.raises(ConflictError) as caught:
+            http.request("PUT", API)
+    finally:
+        http.close()
+    assert caught.value.request_id is None
+
+
+def test_request_id_uses_valid_secondary_header():
+    http = make_http(
+        lambda _: httpx.Response(
+            409, headers={"x-vss-e2eid": "unsafe value", "x-ms-request-id": "safe-id"}
+        )
+    )
+    try:
+        with pytest.raises(ConflictError) as caught:
+            http.request("PUT", API)
+    finally:
+        http.close()
+    assert caught.value.request_id == "safe-id"
+
+
+def test_no_replay_is_per_operation_not_a_persistent_setting(monkeypatch):
+    waits = []
+    monkeypatch.setattr("az_artifacts._http.time.sleep", waits.append)
+    responses = iter([httpx.Response(503), httpx.Response(503), httpx.Response(200)])
+    http = make_http(lambda _: next(responses), retries=1)
+    try:
+        with pytest.raises(ServiceError):
+            http.request("PUT", API, retry=False)
+        assert waits == []
+        assert http.request("GET", API).status == 200
+    finally:
+        http.close()
+    assert waits == [1]

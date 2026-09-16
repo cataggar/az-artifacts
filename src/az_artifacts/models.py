@@ -1,4 +1,4 @@
-"""Typed catalog summaries, package metadata, inspection, and download results."""
+"""Typed catalog summaries, registration metadata, inspection, and download results."""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -118,8 +118,12 @@ class PackagePushMetadata:
     """Registration data only; constructing this model does not publish anything.
 
     ``manifest_id`` and ``super_root_id`` identify pre-uploaded dedup content.
-    ``proof_nodes`` is an immutable tuple of opaque proof strings, not blob IDs.
-    ``description`` is optional and may be empty.
+    add_package() validates their 64-hex-digit plus 01/02 shapes and serializes
+    uppercase IDs. ``proof_nodes`` must be a tuple of opaque strings, not blob IDs;
+    order, duplicates, empty strings and an empty tuple are preserved on the wire.
+    ``description`` None is omitted; an empty string is sent unchanged.
+    Validation occurs on registration, not construction. Content/proof generation
+    and upload are caller preconditions, not operations provided by this model.
     """
 
     manifest_id: str

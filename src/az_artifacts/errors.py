@@ -26,6 +26,27 @@ class NotFoundError(ServiceError):
     """The requested resource does not exist."""
 
 
+class ConflictError(ServiceError):
+    """The service confirmed HTTP 409; registration did not overwrite the version."""
+
+
+class RegistrationOutcomeUnknownError(ArtifactsError):
+    """Registration was not synchronously acknowledged; it may have committed.
+
+    Never automatically replay this operation or treat a later conflict as success.
+    Reconciliation requires explicitly checking the intended metadata. Optional
+    ``status_code`` and sanitized ``request_id`` retain available response context;
+    neither is available for transport or response-decoding failures.
+    """
+
+    def __init__(
+        self, message: str, *, status_code: int | None = None, request_id: str | None = None
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.request_id = request_id
+
+
 class TransportError(ArtifactsError):
     """A request could not be completed."""
 

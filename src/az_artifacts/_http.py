@@ -1,6 +1,7 @@
 """HTTP transport with separate authenticated and signed-URL request paths."""
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -12,6 +13,7 @@ import httpx
 from .auth import Credential, authorization
 from .errors import (
     AuthenticationError,
+    ConflictError,
     NotFoundError,
     PermissionDeniedError,
     ProtocolError,
@@ -60,6 +62,14 @@ class Response:
     headers: httpx.Headers
     status: int
 
+    @property
+    def request_id(self) -> str | None:
+        for name in ("x-vss-e2eid", "x-ms-request-id"):
+            value = self.headers.get(name)
+            if value is not None and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", value):
+                return value
+        return None
+
     def json(self) -> object:
         try:
             result: object = json.loads(self.body)
@@ -106,9 +116,14 @@ class Http:
         json_body: object = None,
         headers: dict[str, str] | None = None,
         max_bytes: int = 16 * 1024 * 1024,
+        retry: bool = True,
     ) -> Response:
+        """Make a bounded request; retry=False forbids automatic failure replay."""
+        if not isinstance(retry, bool):
+            raise TypeError("retry must be a boolean")
         validate_url(url, authenticated=authenticated)
-        for attempt in range(self._retries + 1):
+        retries = self._retries if retry else 0
+        for attempt in range(retries + 1):
             request_headers = dict(headers or {})
             if authenticated:
                 request_headers["Authorization"] = authorization(self._credential)
@@ -127,17 +142,18 @@ class Http:
             except httpx.DecodingError:
                 raise ProtocolError("Unable to decode the HTTP response content encoding") from None
             except httpx.TransportError:
-                if attempt == self._retries:
+                if attempt == retries:
                     # HTTPX errors can include signed URL query strings.
                     raise TransportError("Unable to complete Azure Artifacts request") from None
                 time.sleep(min(2**attempt, 30))
                 continue
             if 200 <= response.status < 300:
                 return response
-            delay = self._retry_delay(response, attempt)
-            if response.status in _RETRY_STATUSES and attempt < self._retries and delay <= 30:
-                time.sleep(delay)
-                continue
+            if response.status in _RETRY_STATUSES and attempt < retries:
+                delay = self._retry_delay(response, attempt)
+                if delay <= 30:
+                    time.sleep(delay)
+                    continue
             self._raise_service_error(response)
         raise AssertionError("Request retry loop exhausted without a result")
 
@@ -201,10 +217,10 @@ class Http:
             401: AuthenticationError,
             403: PermissionDeniedError,
             404: NotFoundError,
+            409: ConflictError,
         }.get(response.status, ServiceError)
         raise error(
             f"Azure Artifacts request failed (HTTP {response.status})",
             status_code=response.status,
-            request_id=response.headers.get("x-vss-e2eid")
-            or response.headers.get("x-ms-request-id"),
+            request_id=response.request_id,
         )
