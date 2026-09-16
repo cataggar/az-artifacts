@@ -644,12 +644,12 @@ def test_private_artifacts_cannot_be_in_git_or_escape_root(tmp_path):
     with pytest.raises(support.BoundaryError):
         support.private_root(str(support.ROOT))
     with pytest.raises(support.BoundaryError):
-        support.private_path(tmp_path, "..\\escape.json", exists=False)
+        support.private_path(tmp_path, os.path.join("..", "escape.json"), exists=False)
     nested = tmp_path / "nested"
     nested.mkdir()
     (nested / ".git").write_text("gitdir: fixture")
     with pytest.raises(support.BoundaryError):
-        support.private_path(tmp_path, "nested\\evidence", exists=False)
+        support.private_path(tmp_path, os.path.join("nested", "evidence"), exists=False)
 
 
 def test_copied_public_config_cannot_be_live(tmp_path):
