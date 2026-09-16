@@ -1,0 +1,7 @@
+capture/bin/
+capture/obj/
+capture_selftest/bin/
+capture_selftest/obj/
+capture-selftest.jsonl
+sdk_probe/bin/
+sdk_probe/obj/

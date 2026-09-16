@@ -7,3 +7,8 @@ __pycache__/
 dist/
 *.egg-info/
 .coverage
+.reference-download/
+.reference-proposal/
+.pytest-artifacts/
+.build-artifacts/
+.interop-local/

@@ -5,7 +5,7 @@ build-backend = "uv_build"
 [project]
 name = "az-artifacts"
 version = "0.1.0"
-description = "Native Python discovery, inspection, download, and registration for Azure DevOps Universal Packages"
+description = "Native Python discovery, metadata, inspection, downloads, and publishing for Azure DevOps Universal Packages"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

@@ -39,10 +39,15 @@ class Downloader:
 
         total = 0
         remaining = iter(selected)
-        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
+        with (
+            ThreadPoolExecutor(max_workers=self._max_workers) as chunks,
+            ThreadPoolExecutor(max_workers=self._max_workers) as executor,
+        ):
             pending = set()
             for item, relative in remaining:
-                pending.add(executor.submit(self._write_file, root, item, relative, overwrite))
+                pending.add(
+                    executor.submit(self._write_file, root, item, relative, overwrite, chunks)
+                )
                 if len(pending) == self._max_workers:
                     break
             try:
@@ -55,21 +60,34 @@ class Downloader:
                         if entry is not None:
                             item, relative = entry
                             pending.add(
-                                executor.submit(self._write_file, root, item, relative, overwrite)
+                                executor.submit(
+                                    self._write_file, root, item, relative, overwrite, chunks
+                                )
                             )
             finally:
                 for future in pending:
                     future.cancel()
         return DownloadResult(metadata, root, tuple(relative for _, relative in selected), total)
 
-    def _write_file(self, root: Path, item: PackageFile, relative: Path, overwrite: bool) -> int:
+    def _write_file(
+        self,
+        root: Path,
+        item: PackageFile,
+        relative: Path,
+        overwrite: bool,
+        chunks: ThreadPoolExecutor,
+    ) -> int:
         destination = prepare_destination(root, relative, overwrite=overwrite)
         descriptor, name = tempfile.mkstemp(prefix=".az-artifacts-", dir=destination.parent)
         temporary = Path(name)
         count = 0
         try:
             with os.fdopen(descriptor, "wb") as stream:
-                for chunk in self._reader.content(BlobRef(item.content_id, item.size)):
+                for chunk in self._reader.content(
+                    BlobRef(item.content_id, item.size),
+                    executor=chunks,
+                    prefetch=min(self._max_workers, 4),
+                ):
                     if count + len(chunk) > item.size:
                         raise IntegrityError("File content exceeds its advertised size")
                     stream.write(chunk)

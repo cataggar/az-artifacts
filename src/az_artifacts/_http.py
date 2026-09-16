@@ -3,7 +3,7 @@
 import json
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote, urljoin, urlsplit
@@ -58,8 +58,8 @@ def endpoint(base: str, *segments: str) -> str:
 
 @dataclass(frozen=True)
 class Response:
-    body: bytes
-    headers: httpx.Headers
+    body: bytes = field(repr=False)
+    headers: httpx.Headers = field(repr=False)
     status: int
 
     @property
@@ -114,15 +114,25 @@ class Http:
         authenticated: bool = True,
         params: dict[str, str] | None = None,
         json_body: object = None,
+        content: bytes | None = None,
         headers: dict[str, str] | None = None,
         max_bytes: int = 16 * 1024 * 1024,
         retry: bool = True,
+        accepted_statuses: frozenset[int] = frozenset(),
+        retry_safe: bool | None = None,
     ) -> Response:
         """Make a bounded request; retry=False forbids automatic failure replay."""
         if not isinstance(retry, bool):
             raise TypeError("retry must be a boolean")
         validate_url(url, authenticated=authenticated)
-        retries = self._retries if retry else 0
+        if content is not None and json_body is not None:
+            raise ValueError("Specify either binary content or JSON, not both")
+        safe = retry_safe
+        if safe is None:
+            safe = method.upper() in ("GET", "HEAD", "OPTIONS") or (
+                method.upper() == "POST" and urlsplit(url).path.endswith("/_apis/dedup/urls")
+            )
+        retries = self._retries if retry and safe else 0
         for attempt in range(retries + 1):
             request_headers = dict(headers or {})
             if authenticated:
@@ -136,8 +146,10 @@ class Http:
                     authenticated=authenticated,
                     params=params,
                     json_body=json_body,
+                    content=content,
                     headers=request_headers,
                     max_bytes=max_bytes,
+                    accepted_statuses=accepted_statuses,
                 )
             except httpx.DecodingError:
                 raise ProtocolError("Unable to decode the HTTP response content encoding") from None
@@ -147,7 +159,7 @@ class Http:
                     raise TransportError("Unable to complete Azure Artifacts request") from None
                 time.sleep(min(2**attempt, 30))
                 continue
-            if 200 <= response.status < 300:
+            if 200 <= response.status < 300 or response.status in accepted_statuses:
                 return response
             if response.status in _RETRY_STATUSES and attempt < retries:
                 delay = self._retry_delay(response, attempt)
@@ -165,14 +177,16 @@ class Http:
         authenticated: bool,
         params: dict[str, str] | None,
         json_body: object,
+        content: bytes | None,
         headers: dict[str, str],
         max_bytes: int,
+        accepted_statuses: frozenset[int],
     ) -> Response:
         for redirect in range(6):
             validate_url(url, authenticated=authenticated)
             client = self._api_client if authenticated else self._blob_client
             with client.stream(
-                method, url, params=params, json=json_body, headers=headers
+                method, url, params=params, json=json_body, content=content, headers=headers
             ) as response:
                 if response.status_code in _REDIRECT_STATUSES:
                     if authenticated:
@@ -186,7 +200,7 @@ class Http:
                     params = None
                     continue
                 body = bytearray()
-                if 200 <= response.status_code < 300:
+                if 200 <= response.status_code < 300 or response.status_code in accepted_statuses:
                     for chunk in response.iter_bytes(chunk_size=64 * 1024):
                         if len(body) + len(chunk) > max_bytes:
                             raise ProtocolError(
@@ -206,7 +220,7 @@ class Http:
                 date = parsedate_to_datetime(retry_after)
                 if date.tzinfo is None:
                     date = date.replace(tzinfo=UTC)
-                return max(0, (date - datetime.now(UTC)).total_seconds())
+                return float(max(0, (date - datetime.now(UTC)).total_seconds()))
             except (ValueError, TypeError, OverflowError):
                 pass
         return float(min(2**attempt, 30))

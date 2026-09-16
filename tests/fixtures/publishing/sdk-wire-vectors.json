@@ -1,0 +1,105 @@
+{
+  "records": [
+    {
+      "source": "local SDK formatter with terminal in-memory handler; no network",
+      "method": "PUT",
+      "route": "/_apis/dedup/chunks/DDAF35A193617ABACC417349AE20413112E6FA4E89A97EA20A9EEEE64B55D39A01",
+      "headers": [
+        {
+          "name": "Accept",
+          "values": [
+            "application/json; api-version=1.0"
+          ]
+        }
+      ],
+      "body": "616263"
+    },
+    {
+      "source": "local SDK formatter with terminal in-memory handler; no network",
+      "method": "PUT",
+      "route": "/_apis/dedup/chunks",
+      "headers": [
+        {
+          "name": "Accept",
+          "values": [
+            "application/json; api-version=1.0"
+          ]
+        },
+        {
+          "name": "X-ms-chunk-DDAF35A193617ABACC417349AE20413112E6FA4E89A97EA20A9EEEE64B55D39A01",
+          "values": [
+            "3/false"
+          ]
+        },
+        {
+          "name": "X-ms-chunk-D6CA746A16BDE43BE49C0407CE019CEC0193AA9D6B9BB2A99B407514C8F7E3D601",
+          "values": [
+            "5/false"
+          ]
+        }
+      ],
+      "body": "6162636465666768"
+    },
+    {
+      "source": "local SDK formatter with terminal in-memory handler; no network",
+      "method": "PUT",
+      "route": "/_apis/dedup/nodes/0A06F40270F054A9F65766AC9B2DEFDF4D25F54B6C38E3B091716F99502C43C202",
+      "headers": [
+        {
+          "name": "Accept",
+          "values": [
+            "application/json; api-version=1.0"
+          ]
+        },
+        {
+          "name": "X-MS-KeepUntils",
+          "values": [
+            "2030-01-02T03:04:05Z"
+          ]
+        },
+        {
+          "name": "X-MS-Signature",
+          "values": [
+            "<synthetic-signature-omitted>"
+          ]
+        }
+      ],
+      "body": "0000000000030000DDAF35A193617ABACC417349AE20413112E6FA4E89A97EA20A9EEEE64B55D39A"
+    },
+    {
+      "source": "synthetic receipts only",
+      "summarySignatureIsXor": false,
+      "summarySignatureIsSum": false,
+      "syntheticAggregateLength": 32,
+      "summarySignatureIsOrderedSha256": true,
+      "singleSummaryIsSha256": true
+    },
+    {
+      "source": "local SDK formatter with terminal in-memory handler; no network",
+      "method": "PUT",
+      "route": "/_apis/dedup/nodes/0A06F40270F054A9F65766AC9B2DEFDF4D25F54B6C38E3B091716F99502C43C202",
+      "headers": [
+        {
+          "name": "Accept",
+          "values": [
+            "application/json; api-version=1.0"
+          ]
+        },
+        {
+          "name": "X-MS-KeepUntils",
+          "values": [
+            "2030-01-02T03:04:05Z,2030-01-03T03:04:05Z"
+          ]
+        },
+        {
+          "name": "X-MS-Signature",
+          "values": [
+            "<synthetic-signature-omitted>"
+          ]
+        }
+      ],
+      "body": "0000000000030000DDAF35A193617ABACC417349AE20413112E6FA4E89A97EA20A9EEEE64B55D39A"
+    }
+  ],
+  "source": "Public Microsoft ArtifactTool 0.2.574 SDK formatter; in-memory terminal handler, synthetic inputs, no network and no real receipts"
+}

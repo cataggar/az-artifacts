@@ -42,6 +42,30 @@ def test_raw_file_and_empty_file(client, service, tmp_path):
     assert any("/org/_packaging/feed/" in request.url.path for request in service.requests)
 
 
+def test_discovery_does_not_reject_unused_resource_ports(client, service, tmp_path):
+    service.services.append({"name": "Audit", "locationUrl": "https://audit.example:444/"})
+    download(client, tmp_path)
+    assert not any(request.url.host == "audit.example" for request in service.requests)
+
+
+def test_discovery_still_rejects_unsupported_dedup_ports(client, service, tmp_path):
+    service.services[1]["locationUrl"] = "https://vsblob.dev.azure.com:444/org/"
+    with pytest.raises(ProtocolError, match="HTTPS"):
+        download(client, tmp_path)
+
+
+def test_packaging_api_location_is_preferred_to_feed_management(client, service, tmp_path):
+    service.services[0]["locationUrl"] = "https://feeds.dev.azure.com/org/"
+    service.services.append(
+        {
+            "name": "PackagingApi",
+            "locationUrl": "https://pkgs.dev.azure.com/org/",
+        }
+    )
+    download(client, tmp_path)
+    assert not any(request.url.host == "feeds.dev.azure.com" for request in service.requests)
+
+
 def test_recursive_nodes_repeated_chunks_and_compression(client, service, tmp_path):
     a = service.chunk(b"AAAA", wire=b"\x00\x00\x00\x40A\x00\x00")
     b = service.chunk(b"raw")

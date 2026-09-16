@@ -1,24 +1,223 @@
 # az-artifacts
 
-Native Python **discovery, metadata, file inspection/comparison, downloads, and
-registration of already-uploaded content** for Azure DevOps Universal Packages,
-without ArtifactTool or an Azure CLI runtime dependency.
+Native Python **discovery, metadata, file inspection/comparison, downloads,
+registration, and publishing** for Azure DevOps Universal Packages, without
+ArtifactTool or an Azure CLI runtime dependency.
 
-**Status: early, experimental implementation; this checkout documents unreleased APIs.**
 The published **PyPI 0.1.0 is download-only**. The source version still reads
-`0.1.0`, but discovery, metadata, inspection/comparison, and registration described
-here require installation from a current checkout until a new release is made.
-This implements a private transfer protocol using the Rust implementation as
-reference. Mock-based tests are not proof of service compatibility: **live Azure
-DevOps interoperability has not yet been verified**. Treat this as experimental,
-not a production-ready replacement for Microsoft's tooling.
+`0.1.0`, but discovery, metadata, inspection/comparison, registration, and publishing
+described here require installation from a current checkout until a new release.
 
-Full Universal Package publishing/content upload is **not supported**:
-`add_package()` only registers existing uploaded references and proofs. Chunking,
-uploading, proof generation, retention, and a high-level `publish()` workflow belong
-to [issue #2](https://github.com/cataggar/az-artifacts/issues/2).
-There is no command-line entry point, subprocess wrapper, or fallback to ArtifactTool.
-Azure DevOps Server (on-premises) is also unsupported; the client targets Azure DevOps Services.
+**Status: experimental; not production-ready.** Publishing
+is implemented in this checkout, not yet released. A native publish of a new
+100 MiB synthetic payload plus empty/zero-filled controls succeeded in a development feed,
+and both native and Microsoft-tool downloads matched every approved hash. Two explicitly
+approved Microsoft-tool references establish the protocol, including a **100 MiB
+file with 1,364 chunks and deeper dedup trees**. Native preparation matches their
+manifests, complete content trees, super-roots, and proofs byte-for-byte. Both
+reference packages were also downloaded and byte-verified with this library and
+Microsoft tooling. Native publication of Bicep 0.43.8, ShellCheck 0.10.0, and
+shfmt 3.11.0 packages also completed, with both downloaders verifying the complete
+file inventories and hashes. This is development-feed interoperability evidence,
+not broad production validation; failure branches also have offline fault-injection coverage.
+
+There is no command-line entry point, subprocess wrapper, or fallback to
+ArtifactTool. Azure DevOps Server (on-premises) is unsupported; this targets
+Azure DevOps Services. Do not treat the private transfer protocol as a
+production-ready replacement for Microsoft's tooling.
+
+## Publish a package
+
+Use an identity with **Packaging: Read & write** and Feed Publisher/Contributor
+access. Organization and authentication remain on the existing client:
+
+```python
+import os
+
+from az_artifacts import PublishRequest, UniversalPackageClient
+
+with UniversalPackageClient(
+    "https://dev.azure.com/org",
+    credential=os.environ["AZURE_DEVOPS_EXT_PAT"],
+) as client:
+    result = client.publish(
+        PublishRequest(
+            feed="feed",  # Name or ID
+            name="my-tool",
+            version="1.2.3",  # Exact, immutable Universal Package version
+            path="./prepared-package",
+            scope="project",
+            project="project",  # Name or ID
+            description="Prepared tool binaries",
+        )
+    )
+
+print(result.metadata.version)
+print(result.bytes_uploaded)
+```
+
+`PublishRequest` is a **frozen dataclass**: `feed`, `name`, and `version`
+are `str`; `path` is `str | Path`; `scope: Scope = "organization"`,
+`project: str | None = None`, and `description: str | None = None`.
+For organization-scoped feeds omit `project` and use the default scope.
+PAT strings, `BearerToken(token)`, and synchronous `TokenCredential` objects
+are supported identically for publishing and downloading.
+
+Package names are lowercase alphanumerics separated by nonconsecutive `-`, `_`,
+or `.`. Publishing versions must be exact lowercase SemVer, without `+` build
+metadata, wildcards, leading-zero numeric identifiers, or numeric components
+larger than 2,147,483,647. Local validation never reserves a version.
+
+`PublishResult` has `metadata: PackageMetadata`, absolute source `path: Path`,
+package-relative `files: tuple[Path, ...]`, and `bytes_uploaded: int`.
+The byte counter includes dedup request bodies (including node negotiation,
+manifest chunks and node bodies), but excludes HTTP headers and registration JSON.
+Existing content can make this much smaller than the source size.
+`metadata.package_size` includes logical manifest bytes.
+
+### Publishing guarantees and limitations
+
+- An existing version raises **`PackageConflictError(ServiceError)`**.
+  There is no overwrite, delete, version bump, or automatic replacement.
+- **`IncompleteUploadError(ArtifactsError)`** means content/retention did not
+  complete and registration was not attempted. Authentication and authorization
+  errors retain their existing types. Filesystem failures raise `OSError`;
+  unsafe entries raise `UnsafePathError`; invalid requests/limits raise `ValueError`.
+- **`AmbiguousPublishError(ArtifactsError)`** means registration was attempted
+  but readback could not confirm it. **Do not blindly retry.** Inspect the exact
+  immutable version first. A lost registration response is reconciled with a
+  read-only GET and exact version, content IDs, size, and description comparison.
+  Ordinary credential-provider failures during this confirmation also raise
+  `AmbiguousPublishError`, preserving the original exception as the cause.
+- Only GET/HEAD/OPTIONS and the read-only blob-URL resolver retry transient
+  failures. Upload transport failures and registration are never automatically
+  retried. A node may be resubmitted after missing children or new retention
+  proofs have been supplied; unsuccessful negotiation is bounded.
+- Chunking uses a 1 MiB lookahead buffer and compatible 32–128 KiB Dedup64K
+  chunks. Uploads use at most 64 chunks (8 MiB) per batch and
+  `min(max_workers, 16)` simultaneous batches. Preparation records and the
+  manifest have conservative budgets based on `max_manifest_bytes`; Python
+  object/receipt overhead adds to these budgets. The whole package is never
+  loaded into memory, and publishing creates **no local staging files**.
+- Keep the source directory quiescent. All regular files, including dotfiles,
+  are included. Before registration the inventory, file identities, metadata,
+  and every original chunk hash are checked again. This detects ordinary
+  changes, but is **not an atomic filesystem snapshot**.
+- Symlinks, junctions, other Windows reparse points, special files, nonportable
+  names, case/Unicode-normalization collisions, and paths deeper than 256
+  components are rejected. Empty files work. Empty directories are omitted;
+  a source with no regular files is rejected.
+- Only paths and bytes are stored: not permissions, executable bits, timestamps,
+  ACLs, alternate streams, sparse allocation, or hard-link relationships.
+- Signed retention receipts remain in process memory only. No credentials or
+  authentication caches are persisted. Failed uploads may leave unregistered
+  dedup data until service retention expires; the library does not delete it.
+
+### Protocol evidence and live-publish gate
+
+The [evidence record](tests/fixtures/publishing/protocol_evidence.json) links
+**normalized captured fixtures**, not raw live records or reusable approvals.
+Organization/project/feed identities, instance IDs, package names, versions, and
+dates have been replaced with synthetic fixture values. Original live-only records
+remain outside the repository. Public protocol resource IDs, synthetic payload
+hashes, and wire structures are retained; opaque signatures and capabilities are
+not. Retention regression tests use wholly synthetic IDs and signatures matching
+the response shape observed with Bicep.
+
+The two Microsoft-tool reference registrations each returned
+204 exactly once. The larger reference contains a 100 MiB deterministic payload,
+an empty file, and 128 KiB of zeros; its full manifest is 427 bytes.
+
+The [large capture](tests/fixtures/publishing/next-approved-publish.jsonl) establishes
+node PUT/409 negotiation (`Missing`, `InsufficientKeepUntil`, `Receipts`), batched
+chunk PUTs, signed retention acknowledgments, deterministic file ordering, packed
+512-child trees, and registration proof bytes. Dedup 409 is **not** a package conflict.
+An existing node's HTTP 200 acknowledgment can include its own receipt plus
+receipts for unique immediate children. A Bicep retention capture returned 511
+entries for a node with 512 child references (510 unique children). These optional
+child receipts are accepted only for known immediate children; a valid, unexpired
+receipt for the requested node remains mandatory. Shared-child receipt updates
+never replace a stronger existing retention proof with an older one.
+Publishing resolves the organization `instanceId` with a read-only `connectionData`
+request and uses the canonical `A{instanceId}` dedup account path. This matches
+all 39 captured dedup writes, rather than assuming the download root alias accepts writes.
+The super-root contains the file-collection root followed by the manifest root.
+Registration uses the [public SDK's][upack-push-client] four
+[fields][upack-push-model]; proofs are base64 serialized nodes, not content ID strings.
+
+Conservatively omitted header values were recovered using the installed SDK with
+a **terminal in-memory HTTP handler and synthetic inputs**, not another remote write:
+chunk headers are `length/false` for uncompressed bytes; `X-MS-KeepUntils` is an
+ordered comma-separated UTC timestamp list; `X-MS-Signature` is base64 SHA256 of
+concatenated child signatures in node order. The initial header capture mistook
+some `length/false` strings for opaque base64; those omissions were not retroactively
+filled in. [Wire vectors](tests/fixtures/publishing/sdk-wire-vectors.json) and
+[30 chunker vectors](tests/fixtures/publishing/sdk-chunk-vectors.json) identify this
+separate local evidence. The chunker is derived from MIT-licensed [BuildXL][buildxl-hashing].
+
+Reference-only instrumentation is under `tests/interop`. The bounded diagnostic
+hook does not intercept TLS, modify trust/proxy settings, or retain credentials,
+signed URLs, opaque receipts, or raw tool logs. Gzip responses are decoded with
+a 16 MiB limit. Microsoft tooling is never imported or invoked by the library.
+
+The approved native cold-source smoke completed with exactly one registration
+PUT/204, 23 successful chunk requests, and 1,368 uploaded chunks that had been
+reported missing. Chunk bodies totaled 104,858,027 bytes (100 MiB plus the
+427-byte manifest); node request bodies added 99,000 bytes. Both downloaders
+verified all three files. See [the result](tests/fixtures/publishing/native-publish-result.json)
+and [sanitized native exchanges](tests/fixtures/publishing/native-python-http-1.jsonl).
+
+The real-tool packages include upstream binaries, licenses, and deterministic
+provenance; ShellCheck also includes its matching source archive. Both downloaders
+verified every package file, and the Microsoft-downloaded executables ran on
+Linux x64. Their registration followed the shared-child receipt correction
+described above; the failed initial Bicep attempt stopped before registration.
+
+Completed immutable experiments must never be republished. To inspect the
+normalized native fixture without any network or write:
+
+```bash
+uv run python tests/interop/native_publish.py
+```
+
+For a future experiment, create and review a **separate local JSON proposal**
+(recommended: `.interop-local/proposal.json`, which is ignored). Set an explicitly
+authorized `organization`, `scope`, `project` (for project scope), `feed`, `name`,
+unused immutable `version`, `description`, absolute `source_directory`,
+`artifacttool_path`, and absolute `evidence_directory` under `.interop-local/`.
+Include `files` entries with package-relative `path`, `size`, and `sha256`, plus
+`publisher: "native-python"` and `approved: true` only after that exact proposal
+is approved. Do not copy completion flags or treat a fixture as approval.
+
+With the Microsoft download reference and locally built capture hook ready, pass
+`--proposal .interop-local/proposal.json --execute-approved`. Credentials come
+only from the process-local `AZ_ARTIFACTS_REFERENCE_TOKEN`. The optional pytest
+live test additionally requires `AZ_ARTIFACTS_RUN_APPROVED_NATIVE_INTEROP=1` and
+`AZ_ARTIFACTS_NATIVE_PROPOSAL` pointing to this local file. Public fixture paths
+and objects marked `fixture_only` are rejected. An exclusive attempt marker
+prevents blind retries; all new evidence stays ignored, never overwriting public
+fixtures. Native publishing is followed by both downloaders and exact hash checks.
+
+`reference_tool.py` likewise requires `--proposal`, and Microsoft reference writes
+additionally require `--execute-approved` with `publisher: "microsoft-artifacttool"`.
+Its preflight uses the proposal organization's discovered package service, not a
+hardcoded destination. `bicep_retention.py` requires its own proposal with
+`publisher: "native-retention-only"` and `--execute-approved`; dedup writes are
+still writes even when registration is disabled. Never run these against production.
+
+For Microsoft **download-only** verification of another approved project-feed
+package, `tests/interop/microsoft_download.py` accepts `--organization`, `--project`,
+`--feed`, `--name`, `--version`, explicit `--tool`, and an empty `--path`. It reads
+`AZ_ARTIFACTS_REFERENCE_TOKEN` only from the process environment, fixes the command
+to `universal download`, and withholds raw tool stdout/stderr. Optional
+`--capture-path` enables the sanitized hook outside the download destination.
+Always compare downloaded files with the reviewed package hashes.
+
+[upack-push-client]: https://github.com/microsoft/azure-devops-python-api/blob/86c9a559fc4ab309df21e674b236a542f9e77f89/azure-devops/azure/devops/v7_1/upack_packaging/upack_packaging_client.py
+[upack-push-model]: https://github.com/microsoft/azure-devops-python-api/blob/86c9a559fc4ab309df21e674b236a542f9e77f89/azure-devops/azure/devops/v7_1/upack_packaging/models.py
+[buildxl-hashing]: https://github.com/microsoft/BuildXL/tree/16e96dc02e86c23afdc6114b0126b4d8549a41e1/Public/Src/Cache/ContentStore/Hashing
+[buildxl-upload]: https://github.com/microsoft/BuildXL/blob/16e96dc02e86c23afdc6114b0126b4d8549a41e1/Public/Src/Cache/ContentStore/Vsts/DedupContentSession.cs
+[pipeline-manifest-publish]: https://github.com/microsoft/azure-pipelines-agent/blob/8853a22f5bc48094641eb284c731f3670235df29/src/Agent.Plugins/Artifact/PipelineArtifactServer.cs
 
 ## Installation
 
@@ -132,8 +331,13 @@ automatically.
 Use the client as a context manager, or call `close()` when finished.
 The public `discover_services()` method returns the discovered service
 name-to-URL mapping and caches the resource-area lookup for the client's
-lifetime. Downloads, catalog, metadata, inspection/comparison, and registration
-share this discovery.
+lifetime. Downloads, catalog, metadata, inspection/comparison, registration, and
+publishing share this discovery.
+Only locations used by this client are checked against its supported URL policy;
+unrelated resource areas can advertise other ports without blocking downloads.
+UPack resource-area identity takes precedence, followed by `UPackPackaging`,
+`PackagingApi`, and the legacy `Packaging` name. Feed-management discovery remains
+separate.
 
 | Client argument | Default / meaning |
 | --- | --- |
@@ -141,8 +345,8 @@ share this discovery.
 | `credential` | Required explicit PAT, `BearerToken`, or synchronous `TokenCredential`. |
 | `timeout` | `60.0` seconds; positive, finite HTTP timeout. |
 | `retries` | `3`; bounded retries for read requests, including read-only Dedup URL-resolution POSTs. Use `0` to disable. Registration PUTs always disable retries independently of this setting. |
-| `max_workers` | `4`; bounds concurrent file download workers. |
-| `max_manifest_bytes` | `64 * 1024 * 1024`; limits the decoded manifest size. |
+| `max_workers` | `4`; bounds file download workers and publishing batches (publishing additionally caps at 16). |
+| `max_manifest_bytes` | `64 * 1024 * 1024`; decoded manifest limit and publishing preparation-record budgets. |
 | `transport` | `None`; optional `httpx.BaseTransport`, such as `httpx.MockTransport` for tests. |
 
 All arguments to `download()` are keyword-only:
@@ -197,7 +401,7 @@ tuple. Full Azure CLI/ArtifactTool glob parity is not claimed.
 | `metadata.version` | Resolved exact package version. |
 | `metadata.manifest_id` | Package manifest identifier. |
 | `metadata.super_root_id` | Package super-root identifier. |
-| `metadata.package_size` | Advertised whole-package size, before filtering. |
+| `metadata.package_size` | Advertised whole-package size, before filtering; can include manifest bytes. |
 | `metadata.description` | Optional package description; missing/null is `None`, and an empty string is preserved. |
 | `path` | Resolved destination `pathlib.Path`. |
 | `files` | Tuple of relative `pathlib.Path` objects for downloaded files; combine with `result.path` to locate them. |
@@ -205,6 +409,9 @@ tuple. Full Azure CLI/ArtifactTool glob parity is not claimed.
 
 Downloads validate content hashes and sizes, bound manifest/decompression work,
 use bounded workers and retries, and reject unsafe manifest/destination paths.
+One shared chunk-fetch pool serves all file workers, with at most
+`min(max_workers, 4)` pending chunks per file. This keeps large single-file
+verification parallel without creating a thread pool for every file.
 The decoder distinguishes raw chunks from the supported LZ77-compressed form
 using the expected SHA-512 content hash truncated to 256 bits, and enforces both
 hash and size checks. Typed recursive deduplication nodes and chunked manifests
@@ -776,8 +983,10 @@ The complete download-command flag mapping is:
 | `--subscription` | No Azure subscription selection; configure your identity and organization explicitly |
 
 `add_package()` accepts a metadata description but does not upload content.
-There is no `publish()` method, upload CLI, `--description` publishing option,
-Azure CLI login/configuration integration, or Azure DevOps Server support.
+For `az artifacts universal publish`, the analogous Python call is
+`client.publish(PublishRequest(feed, name, version, path, scope=..., project=...,
+description=...))`. There is no upload CLI, CLI login/configuration integration,
+or Azure DevOps Server support.
 
 ## Development and verification
 
@@ -894,8 +1103,8 @@ inside the `pypi` environment. There are no PyPI password/API-token secrets.
    and build results. Build artifacts are retained for 14 days, so any required
    approvals must occur before they expire.
 
-PyPI publishing here distributes the **Python library**; it does not add Universal Package
-publishing support.
+PyPI publishing here distributes the **Python library**; it does not itself
+publish any Universal Package to an Azure Artifacts feed.
 
 ## License and provenance
 
@@ -903,7 +1112,8 @@ MIT licensed. The native download implementation is based on the Microsoft
 MIT-licensed Rust code in
 `../azure-devops-rust-api/azure_devops_rust_api/src/artifacts_download`, including
 its Universal Package metadata, deduplication, and decompression protocol work.
-The typed node format and content hashes also follow Microsoft's
+The native chunker and packed-tree builder are adapted from MIT-licensed BuildXL;
+the typed node format and content hashes also follow Microsoft's
 [BuildXL hashing implementation](https://github.com/microsoft/BuildXL/tree/main/Public/Src/Cache/ContentStore/Hashing).
 The exact upstream Microsoft license and copyright notice are retained in the
 root [LICENSE](LICENSE); preserve that notice when redistributing derived code.

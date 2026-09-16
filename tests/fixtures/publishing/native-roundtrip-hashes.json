@@ -1,0 +1,54 @@
+{
+  "source": [
+    {
+      "path": "payload.bin",
+      "size": 104857600,
+      "sha256": "514dd8bcb18fa0afb5b93eaffa7a636cf943e54638ae7b56c2a10b03481b14f5"
+    },
+    {
+      "path": "empty.txt",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "nested/repeated.bin",
+      "size": 131072,
+      "sha256": "fa43239bcee7b97ca62f007cc68487560a39e19f74f3dde7486db3f98df8e471"
+    }
+  ],
+  "native": [
+    {
+      "path": "payload.bin",
+      "size": 104857600,
+      "sha256": "514dd8bcb18fa0afb5b93eaffa7a636cf943e54638ae7b56c2a10b03481b14f5"
+    },
+    {
+      "path": "empty.txt",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "nested/repeated.bin",
+      "size": 131072,
+      "sha256": "fa43239bcee7b97ca62f007cc68487560a39e19f74f3dde7486db3f98df8e471"
+    }
+  ],
+  "microsoft": [
+    {
+      "path": "payload.bin",
+      "size": 104857600,
+      "sha256": "514dd8bcb18fa0afb5b93eaffa7a636cf943e54638ae7b56c2a10b03481b14f5"
+    },
+    {
+      "path": "empty.txt",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "nested/repeated.bin",
+      "size": 131072,
+      "sha256": "fa43239bcee7b97ca62f007cc68487560a39e19f74f3dde7486db3f98df8e471"
+    }
+  ],
+  "verified_on": "2000-01-01T22:41:05.626601+00:00"
+}

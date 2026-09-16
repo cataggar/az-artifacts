@@ -1,0 +1,308 @@
+{
+  "schema_version": 1,
+  "status": "normalized-captured-protocol-fixtures",
+  "notes": [
+    "Normalized captures of development-only experiments, not production validation.",
+    "Organization, project, feed, instance IDs, package names, versions and dates are synthetic.",
+    "Synthetic content bytes, content hashes, public protocol resource IDs and wire structures are retained.",
+    "Raw live-only records and approvals are retained privately, not in this repository.",
+    "These fixtures are never write authority; live runs require a separate explicit local proposal and opt-in.",
+    "Omitted capture values remain omitted; successful mock tests do not establish live interoperability."
+  ],
+  "observations": {
+    "resource_areas": {
+      "dedup": "01e4817c-857e-485c-9401-0334a33200da",
+      "packaging": "7ab4e64e-c4d8-4f50-ae73-5ef2e21642a5",
+      "packagingapi": "bd3c2e79-f43c-4af6-b3bb-6088df7ea66e"
+    },
+    "registration": {
+      "method_from_public_sdk": "PUT",
+      "id": "4cdb2ced-0758-4651-8032-010f070dd7e5",
+      "area": "upack",
+      "resource_name": "packages",
+      "route_template": "{project}/_packaging/{feedId}/{area}/{resource}/{packageName}/versions/{packageVersion}",
+      "min_version": "5.0",
+      "max_version": "7.2",
+      "request_fields_from_public_sdk": [
+        "description",
+        "manifestId",
+        "proofNodes",
+        "superRootId"
+      ]
+    },
+    "dedup_routes": [
+      {
+        "id": "c8911095-ce13-48e9-b1dc-158c716aa6ba",
+        "resource_name": "chunks",
+        "route_template": "_apis/{area}/{resource}/{dedupId}"
+      },
+      {
+        "id": "53e6e1e0-7444-47ea-93cd-44e6ddf264e6",
+        "resource_name": "nodes",
+        "route_template": "_apis/{area}/{resource}/{dedupId}"
+      },
+      {
+        "id": "2f154496-2068-4f99-8887-b39b1fb8611d",
+        "resource_name": "validations",
+        "route_template": "_apis/{area}/{resource}/{dedupId}"
+      },
+      {
+        "id": "b30d4d8e-d3d7-4c2e-9bb5-f1878d6d2e3a",
+        "resource_name": "roots",
+        "route_template": "_apis/{area}/{resource}/{dedupId}/{*name}"
+      },
+      {
+        "id": "e618578c-07d1-454b-9e0e-147927221211",
+        "resource_name": "sessions",
+        "route_template": "_apis/domains/{domainId}/{area}/{resource}/{sessionid}"
+      },
+      {
+        "id": "8d18e458-79d9-43e8-8df4-4b0f41ce7ca8",
+        "resource_name": "parts",
+        "route_template": "_apis/domains/{domainId}/{area}/sessions/{sessionid}/{resource}"
+      },
+      {
+        "id": "49b6af14-4c77-4fbc-b6de-b877537da893",
+        "resource_name": "blobs",
+        "route_template": "_apis/domains/{domainId}/{area}/{resource}/{nodeId}"
+      }
+    ],
+    "reference_publish": {
+      "tool": "ArtifactTool_win-x64_0.2.574",
+      "tool_runtime": "net10.0",
+      "capture_method": "Per-process DOTNET_STARTUP_HOOKS diagnostic subscription; TLS verification unchanged.",
+      "capture": "approved-publish.jsonl",
+      "tool_exit_code": 0,
+      "registration_attempts": 1,
+      "registration_status": 204,
+      "dedup_missing_statuses": [
+        409,
+        409
+      ],
+      "keep_until": "2000-01-03T19:10:51Z",
+      "manifest_id": "30E33EBEDDC44F55395918ED89DC0AF3D503BAF5E22209AE95508D0AB958291A01",
+      "file_tree_id": "B04D4FD3DEF3AB99E1EA9F9490CB2965F2A82C33A76413BEF9FCDA8F0541FAFC02",
+      "super_root_id": "16879C9F5454FD61227900B65867D9973601D80AED292EDEF8C170A428CD4F0902",
+      "manifest_bytes": 175,
+      "source_bytes": 44,
+      "service_package_size": 219,
+      "proof_encoding": "base64 serialized nodes: file-tree node, then super-root",
+      "native_download": "verified",
+      "microsoft_tool_download": "verified",
+      "native_upload": "not attempted",
+      "large_package_interoperability": "not established"
+    }
+  },
+  "public_sources": {
+    "registration_client": "https://github.com/microsoft/azure-devops-python-api/blob/86c9a559fc4ab309df21e674b236a542f9e77f89/azure-devops/azure/devops/v7_1/upack_packaging/upack_packaging_client.py",
+    "registration_models": "https://github.com/microsoft/azure-devops-python-api/blob/86c9a559fc4ab309df21e674b236a542f9e77f89/azure-devops/azure/devops/v7_1/upack_packaging/models.py",
+    "hashing": "https://github.com/microsoft/BuildXL/tree/16e96dc02e86c23afdc6114b0126b4d8549a41e1/Public/Src/Cache/ContentStore/Hashing",
+    "dedup_upload_call_site": "https://github.com/microsoft/BuildXL/blob/16e96dc02e86c23afdc6114b0126b4d8549a41e1/Public/Src/Cache/ContentStore/Vsts/DedupContentSession.cs",
+    "manifest_publish_call_site": "https://github.com/microsoft/azure-pipelines-agent/blob/8853a22f5bc48094641eb284c731f3670235df29/src/Agent.Plugins/Artifact/PipelineArtifactServer.cs"
+  },
+  "local_sdk_evidence": {
+    "method": "Public installed Microsoft SDK APIs with a terminal in-memory HttpMessageHandler; no network, no real receipts, no implementation disassembly.",
+    "wire_vectors": "sdk-wire-vectors.json",
+    "chunker_vectors": "sdk-chunk-vectors.json",
+    "chunk_header": "X-ms-chunk-{id}: {length}/false for uncompressed bytes, in concatenated request-body order",
+    "retention_dates": "X-MS-KeepUntils is a comma-separated UTC timestamp list in serialized child order",
+    "retention_summary": "X-MS-Signature is base64(SHA256(concatenated child receipt signatures in serialized child order)); verified for one and two synthetic receipts",
+    "capture_correction": "The second capture classified some length/false strings as opaque base64 because they happen to use the base64 alphabet. No omitted value was retroactively manufactured.",
+    "chunker_cases": 30,
+    "chunker_cases_include": "Empty, small, min/max chunk sizes, exact 1 MiB boundaries, short reads, all-zero runs, and zero/random transitions"
+  },
+  "upload_account_discovery": {
+    "fixture": "upload-account-discovery.json",
+    "method": "Read-only GET organization/_apis/connectionData with connectOptions=0",
+    "account_path": "A{instanceId}",
+    "verified_against_all_captured_dedup_writes": true,
+    "captured_dedup_writes": 39,
+    "download_alias_assumed_writable": false
+  },
+  "unresolved_contracts": [
+    "Development-only native smoke and public-tool package roundtrips were verified; this does not establish production reliability.",
+    "Write failures and ambiguous registration remain covered by offline fault injection rather than deliberately induced live faults. Nonempty InsufficientKeepUntil and rich node acknowledgments were observed during Bicep retention diagnosis.",
+    "More-than-512-file collection proofs and chunked manifests have offline coverage, not a captured Microsoft registration.",
+    "Only the observed legacy dedup endpoint is implemented; other domain/session transfer protocols are not claimed."
+  ],
+  "bicep_retention_discovery": {
+    "package": "fixture.tools.bicep.linux-x64",
+    "version": "0.43.8",
+    "registration_disabled": true,
+    "observed_http_status": 200,
+    "observed_child_references": 512,
+    "observed_unique_children": 510,
+    "observed_receipts": 511,
+    "meaning": "Requested node receipt plus all unique immediate child receipts; not an empty success and not unrelated descendant receipts.",
+    "fix": "Accept only the requested node and immediate child receipt IDs, require a positive unexpired requested-node receipt, and preserve stronger cached retention proofs across shared subtrees.",
+    "verification_super_root_ready": true,
+    "verification_registration_attempts": 0,
+    "verification_chunk_body_bytes": 1456,
+    "verification_node_body_bytes": 8324,
+    "regression": "tests/test_bicep_retention.py constructs synthetic IDs and receipts matching the observed 512-reference, 510-unique-child acknowledgment shape."
+  },
+  "next_gate": "No public fixture authorizes a live write. Supply a separate approved local proposal with an unused immutable version, explicit endpoints and source hashes.",
+  "next_reference_experiment": {
+    "approved": false,
+    "executed": true,
+    "completed": true,
+    "result": {
+      "tool_exit_code": 0,
+      "registration_status": 204,
+      "registration_attempts": 1,
+      "captured_requests": 45,
+      "microsoft_download": "all three file sizes and SHA256 hashes verified",
+      "native_download": "all three file sizes and SHA256 hashes verified",
+      "native_download_fixture": "next-reference-verification.json",
+      "native_download_notes": "A no-retry attempt encountered HTTP 503. Final verification passed using the shared bounded chunk-prefetch pool and safe read retries.",
+      "native_preparation": "all 1364 payload chunk boundaries and hashes, full manifest, roots, and proof nodes match the Microsoft reference",
+      "payload_chunks": 1364,
+      "payload_root_children": 342,
+      "full_512_child_nodes": 2,
+      "logical_package_size_including_manifest": 104989099,
+      "manifest_bytes": 427,
+      "compressed_manifest_upload_bytes": 386
+    },
+    "organization": "https://dev.azure.com/fixtureorg",
+    "scope": "project",
+    "project": "fixture-project",
+    "feed": "fixture-feed",
+    "name": "fixture-publish-smoke",
+    "version": "0.0.2-feasibility.20000101",
+    "description": "Native Python Universal Package publishing multi-chunk reference; synthetic test data only.",
+    "source_directory": ".reference-proposal/0.0.2-feasibility.20000101",
+    "total_bytes": 104988672,
+    "payload_algorithm": "payload.bin = concatenated SHA256(UTF-8 bytes of 'az-artifacts reference multi-chunk v1' + NUL byte + uint64_le(i)), i=0..3276799; nested/repeated.bin = 131072 zero bytes.",
+    "files": [
+      {
+        "path": "payload.bin",
+        "size": 104857600,
+        "sha256": "40492eefa76821a14b8044f9e34f71559710bbb1647ab9eb388fe065fd778d7d"
+      },
+      {
+        "path": "empty.txt",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "nested/repeated.bin",
+        "size": 131072,
+        "sha256": "fa43239bcee7b97ca62f007cc68487560a39e19f74f3dde7486db3f98df8e471"
+      }
+    ],
+    "capture_preconditions": [
+      "Obtain separate approval and recheck package absence and generated payload bytes immediately before the write.",
+      "Test gzip response decoding and bounded capture against batched request bodies before the publish.",
+      "Capture nonsecret X-ms-chunk-* header values and safe structural information from X-MS-KeepUntils; redact opaque capability/signature material.",
+      "Do not replace or delete the already completed 0.0.1-feasibility.20000101 version."
+    ],
+    "goals": [
+      "Recover chunk framing and successful retention response contracts missing from the first capture.",
+      "Observe multi-chunk, compressible, empty-file, multi-file manifest, and proof behavior.",
+      "The 100 MiB synthetic payload exercises more than 512 chunks and deeper trees.",
+      "This Microsoft reference experiment does not verify native publishing; actual-tool native interoperability still requires separate approval."
+    ],
+    "capture_readiness": {
+      "format": 2,
+      "network_during_self_test": "loopback only",
+      "tls_policy": "unchanged",
+      "full_streaming_request_bytes_verified": 104857600,
+      "full_streaming_request_sha256": "40492eefa76821a14b8044f9e34f71559710bbb1647ab9eb388fe065fd778d7d",
+      "large_request_raw_bytes_retained": false,
+      "chunk_capture_buffer_bytes": 65536,
+      "metadata_capture_buffer_bytes": 1048576,
+      "retention_header_structure_limit_bytes": 1048576,
+      "response_and_decoded_gzip_limit_bytes": 16777216,
+      "gzip_response_decoding": "passed",
+      "numeric_chunk_header_capture": "passed",
+      "actual_length_boolean_chunk_header_capture": "passed after local SDK formatter analysis",
+      "utc_date_list_header_capture": "passed after local SDK formatter analysis",
+      "retention_header_structure_encodings_tested": [
+        "JSON",
+        "base64 JSON",
+        "base64 gzip JSON"
+      ],
+      "opaque_receipt_and_signature_redaction": "passed",
+      "capture_errors": "fail closed with process exit 90; reconcile registration read-only before another invocation"
+    },
+    "fixture_only": true
+  },
+  "native_interop_proposal": {
+    "publisher": "native-python",
+    "approved": false,
+    "executed": true,
+    "registration_confirmed": true,
+    "sanitized_native_http": "native-python-http-1.jsonl",
+    "roundtrip_verification": "native and Microsoft-tool downloads both match the exact approved file inventory, sizes, and SHA256 hashes",
+    "completed": true,
+    "result_evidence": "native-publish-result.json",
+    "independent_download_hashes": "native-roundtrip-hashes.json",
+    "microsoft_download_evidence": "native-download.jsonl",
+    "organization": "https://dev.azure.com/fixtureorg",
+    "scope": "project",
+    "project": "fixture-project",
+    "project_id": "22222222-2222-4222-8222-222222222222",
+    "feed": "fixture-feed",
+    "feed_id": "33333333-3333-4333-8333-333333333333",
+    "name": "fixture-publish-smoke",
+    "version": "0.0.3-native.20000101",
+    "description": "Native Python Universal Package publishing interoperability check; synthetic test data only.",
+    "source_directory": ".reference-proposal/0.0.3-native.20000101",
+    "total_bytes": 104988672,
+    "payload_algorithm": "payload.bin = concatenated SHA256(UTF-8 bytes of 'az-artifacts native interoperability v1' + NUL byte + uint64_le(i)), i=0..3276799; empty.txt is empty; nested/repeated.bin = 131072 zero bytes.",
+    "files": [
+      {
+        "path": "payload.bin",
+        "size": 104857600,
+        "sha256": "514dd8bcb18fa0afb5b93eaffa7a636cf943e54638ae7b56c2a10b03481b14f5"
+      },
+      {
+        "path": "empty.txt",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "nested/repeated.bin",
+        "size": 131072,
+        "sha256": "fa43239bcee7b97ca62f007cc68487560a39e19f74f3dde7486db3f98df8e471"
+      }
+    ],
+    "scope_of_experiment": [
+      "Only native publishing to this new immutable version, followed by read-only native and Microsoft-tool downloads, is proposed.",
+      "The newly seeded 100 MiB payload is intended to exercise missing-content uploads rather than a warm-only reference reuse. The empty and zero-filled control files intentionally retain their existing contents.",
+      "Real native-tool packages require their own exact previews and explicit approval; this proposal alone does not authorize them."
+    ],
+    "fixture_only": true
+  },
+  "reference_publish_proposal": {
+    "approved": false,
+    "completed": true,
+    "purpose": "Capture a sanitized Microsoft-tool reference transcript; this is not a native publish.",
+    "organization": "https://dev.azure.com/fixtureorg",
+    "scope": "project",
+    "project": "fixture-project",
+    "feed": "fixture-feed",
+    "name": "fixture-publish-smoke",
+    "version": "0.0.1-feasibility.20000101",
+    "description": "Native Python Universal Package publishing feasibility reference; synthetic test data only.",
+    "source_directory": "tests/fixtures/publishing/smoke",
+    "total_bytes": 44,
+    "files": [
+      {
+        "path": "hello.txt",
+        "content_utf8": "az-artifacts native publishing feasibility\r\n",
+        "size": 44,
+        "sha256": "f602c59845f4235f3cc75c215ce465cb5f7beea7800b808b42ace2f399a34081",
+        "dedup_chunk_id": "AC9A362E6F4DC699A83550A27A3F7EBDCAA7C01B00C79FA53F84BD45AAA2004A01"
+      }
+    ],
+    "preconditions": [
+      "Obtain explicit approval before publishing or uploading any content or references.",
+      "Recheck package-version availability and the actual source bytes immediately before the approved action.",
+      "Do not log credentials, authorization headers, or signed URL query strings.",
+      "Do not substitute a production feed or invoke a tool from a library publish path."
+    ],
+    "fixture_only": true
+  },
+  "fixture_only": true
+}
