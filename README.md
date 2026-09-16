@@ -1,36 +1,44 @@
 # az-artifacts
 
-Native Python **discovery, metadata, file inspection/comparison, and downloads** for Azure
-DevOps Universal Packages, without ArtifactTool or an Azure CLI runtime dependency.
+Native Python **discovery, metadata, file inspection/comparison, downloads, and
+registration of already-uploaded content** for Azure DevOps Universal Packages,
+without ArtifactTool or an Azure CLI runtime dependency.
 
-**Status: early, experimental implementation (0.1.0).**
+**Status: early, experimental implementation; this checkout documents unreleased APIs.**
+The published **PyPI 0.1.0 is download-only**. The source version still reads
+`0.1.0`, but discovery, metadata, inspection/comparison, and registration described
+here require installation from a current checkout until a new release is made.
 This implements a private transfer protocol using the Rust implementation as
 reference. Mock-based tests are not proof of service compatibility: **live Azure
 DevOps interoperability has not yet been verified**. Treat this as experimental,
 not a production-ready replacement for Microsoft's tooling.
 
-Universal Package publishing/uploading is **not supported**. There is no command-line
-entry point, subprocess wrapper, or fallback to ArtifactTool. Azure DevOps Server
-(on-premises) is also unsupported; the client targets Azure DevOps Services.
+Full Universal Package publishing/content upload is **not supported**:
+`add_package()` only registers existing uploaded references and proofs. Chunking,
+uploading, proof generation, retention, and a high-level `publish()` workflow belong
+to [issue #2](https://github.com/cataggar/az-artifacts/issues/2).
+There is no command-line entry point, subprocess wrapper, or fallback to ArtifactTool.
+Azure DevOps Server (on-premises) is also unsupported; the client targets Azure DevOps Services.
 
 ## Installation
 
 Requires Python **3.11 or newer**. The runtime dependencies are `httpx` and `wcmatch`.
 
-Install the package from [PyPI](https://pypi.org/project/az-artifacts/):
+For the released **download-only 0.1.0**, install from
+[PyPI](https://pypi.org/project/az-artifacts/):
 
 ```bash
 uv add az-artifacts
 ```
 
-To work from this checkout:
+For the new APIs in this README, work from a current checkout instead:
 
 ```bash
 uv sync --locked --group dev
 uv run --locked python
 ```
 
-To use the checkout from another uv project:
+Or install that checkout into another uv project (replace the path):
 
 ```bash
 uv add /path/to/az-artifacts
@@ -124,14 +132,15 @@ automatically.
 Use the client as a context manager, or call `close()` when finished.
 The public `discover_services()` method returns the discovered service
 name-to-URL mapping and caches the resource-area lookup for the client's
-lifetime. Downloads, catalog, and metadata methods share this discovery.
+lifetime. Downloads, catalog, metadata, inspection/comparison, and registration
+share this discovery.
 
 | Client argument | Default / meaning |
 | --- | --- |
 | `organization` | Required organization name, `https://dev.azure.com/org`, or legacy `https://org.visualstudio.com` URL. No automatic organization detection. |
 | `credential` | Required explicit PAT, `BearerToken`, or synchronous `TokenCredential`. |
 | `timeout` | `60.0` seconds; positive, finite HTTP timeout. |
-| `retries` | `3`; bounded retries for transient request failures. Use `0` to disable retries. |
+| `retries` | `3`; bounded retries for read requests, including read-only Dedup URL-resolution POSTs. Use `0` to disable. Registration PUTs always disable retries independently of this setting. |
 | `max_workers` | `4`; bounds concurrent file download workers. |
 | `max_manifest_bytes` | `64 * 1024 * 1024`; limits the decoded manifest size. |
 | `transport` | `None`; optional `httpx.BaseTransport`, such as `httpx.MockTransport` for tests. |
@@ -156,7 +165,8 @@ needed. Passing `project` with the default `scope="organization"` raises
 
 ### Version selection and file filters
 
-Exact versions, including prereleases such as `1.2.3-rc.1`, are accepted.
+Exact Universal Package SemVer versions, including lowercase prereleases such as
+`1.2.3-rc.1`, are accepted; build metadata (`+build`) is not supported.
 Wildcard selectors `*`, `1.*`, and `1.2.*` resolve to the latest **stable** matching
 numeric SemVer, not lexical order (`1.10.0` is newer than `1.9.0`). Wildcards do not
 select prereleases; use an exact prerelease version instead.
@@ -217,10 +227,17 @@ transaction, and directories created during an unsuccessful download may remain.
 Do not modify the output directory concurrently, including from another download
 client or process.
 
-Library errors derive from `ArtifactsError`, including `AuthenticationError`,
+Library errors derive from `ArtifactsError`, including `ServiceError`, `AuthenticationError`,
 `PermissionDeniedError`, `NotFoundError`, `PackageNotFoundError`, `VersionNotFoundError`,
 `NoMatchingFilesError`, `TransportError`, `ProtocolError`, `IntegrityError`,
-`LocalFileChangedError`, and `UnsafePathError`. Invalid arguments can raise
+`LocalFileChangedError`, `UnsafePathError`, `ConflictError`, and
+`RegistrationOutcomeUnknownError`. `AuthenticationError` (401),
+`PermissionDeniedError` (403), `NotFoundError` (404), and `ConflictError` (409) are
+`ServiceError` subclasses retaining `status_code` and an optional `request_id`.
+Request IDs are accepted only as bounded ASCII identifier tokens; unsafe values
+are discarded. Error messages omit response bodies, request URLs, credentials,
+and proof data. Registration uncertainty is separate from `ServiceError` and is
+**not** permission to retry; see its outcome contract below. Invalid arguments can raise
 `ValueError`/`TypeError`, and local filesystem failures can raise ordinary `OSError`
 subclasses.
 
@@ -229,7 +246,8 @@ subclasses.
 The hierarchy is **organization → feed → package → version → files**.
 Project-scoped feeds additionally belong to a project. A file is part of a package
 version, not independently versioned. Manifest-only inspection, path history, and
-content comparison are available below. Registration APIs are **not implemented yet**.
+content comparison are available below. The low-level `add_package()` registration
+primitive is separate from these read-only checks.
 
 ```python
 import os
@@ -314,7 +332,7 @@ there is no `can_publish()` API.
 
 Catalog requests use Feed API `7.1` on `feeds.dev.azure.com`, resolved through the
 shared Feed resource area (by ID/name) or its known organization fallback. Transfer
-metadata uses the separate `pkgs.dev.azure.com` service. No NuGet-only `isListed`
+metadata and registration use the separate `pkgs.dev.azure.com` service. No NuGet-only `isListed`
 or `isRelease` filters are sent for Universal Packages. These paths follow the
 [Feed REST API](https://learn.microsoft.com/en-us/rest/api/azure/devops/artifacts/feed-management/get-feeds?view=azure-devops-rest-7.1)
 and pinned SDK; **live catalog compatibility remains unverified**.
@@ -362,24 +380,47 @@ signals raise `ProtocolError`. Both methods propagate service/protocol failures,
 including 404s, rather than treating them as an empty result.
 
 Descriptions preserve empty strings; missing/null descriptions are `None`.
-The exported frozen `PackagePushMetadata(manifest_id, super_root_id, proof_nodes,
-description=None)` and `PackageVersionDeletionState(name, version,
-deleted_date=None)` are **models only**, not publishing/deletion APIs.
-Proof nodes are an immutable tuple of opaque strings; deletion dates are optional
-timezone-aware UTC datetimes. There is no `add_package()` or deletion method.
+`PackagePushMetadata` supplies the registration input described below.
+The exported frozen `PackageVersionDeletionState(name, version, deleted_date=None)`
+remains **data only**, with an optional timezone-aware UTC deletion timestamp;
+there is no deletion/restore API.
 
-### Experimental metadata routing
+### SDK capability mapping and experimental routing
+
+The pinned [`v7_1.upack_packaging` SDK](https://github.com/microsoft/azure-devops-python-api/tree/86c9a559fc4ab309df21e674b236a542f9e77f89/azure-devops/azure/devops/v7_1/upack_packaging)
+contains three operations and five models. This checkout covers that narrow
+surface without an `azure-devops` or `msrest` runtime dependency:
+
+| SDK operation | Native API / result |
+| --- | --- |
+| `add_package(metadata, feed_id, package_name, package_version, project=None)` | Keyword-only `add_package(feed=..., name=..., version=..., metadata=..., scope=..., project=...)` → `None` on acknowledged registration, not file upload. |
+| `get_package_metadata(...)` | `get_package_metadata(...)` → `PackageMetadata`, with optional `intent`. |
+| `get_package_versions_metadata(...)` | `get_package_versions_metadata(...)` → `LimitedPackageMetadataListResponse`; distinct from the richer catalog `list_package_versions()`. |
+
+| SDK model | Exported frozen model |
+| --- | --- |
+| `UPackPackageMetadata` | `PackageMetadata(version, manifest_id, super_root_id, package_size, description=None)` |
+| `UPackLimitedPackageMetadata` | `LimitedPackageMetadata(version, description=None)` |
+| `UPackLimitedPackageMetadataListResponse` | `LimitedPackageMetadataListResponse(count, value)` |
+| `UPackPackagePushMetadata` | `PackagePushMetadata(manifest_id, super_root_id, proof_nodes, description=None)` |
+| `UPackPackageVersionDeletionState` | `PackageVersionDeletionState(name, version, deleted_date=None)`; no deletion operation. |
+
+The catalog and file APIs are additional native capabilities, not full
+FeedClient/UPackApiClient parity. Native methods require explicit supported
+identities and immutable tuples where applicable, rather than SDK model coercion.
 
 The pinned Python SDK uses location `4cdb2ced-0758-4651-8032-010f070dd7e5` and API
-`7.1-preview.1` for [both metadata GETs](https://github.com/microsoft/azure-devops-python-api/blob/86c9a559fc4ab309df21e674b236a542f9e77f89/azure-devops/azure/devops/v7_1/upack_packaging/upack_packaging_client.py#L53-L101).
+`7.1-preview.1` for [registration PUT and both metadata GETs](https://github.com/microsoft/azure-devops-python-api/blob/86c9a559fc4ab309df21e674b236a542f9e77f89/azure-devops/azure/devops/v7_1/upack_packaging/upack_packaging_client.py#L28-L101).
 Its [route substitution](https://github.com/microsoft/azure-devops-python-api/blob/86c9a559fc4ab309df21e674b236a542f9e77f89/azure-devops/azure/devops/client.py#L117-L157)
 removes omitted placeholder segments, but retains literal segments. Based on
 that shared location and this library's existing exact-version route, the new
 versionless GET uses
 `/{project?}/_packaging/{feed}/upack/packages/{name}/versions`, without a final
-version segment. This is an **inferred route**, not a live-discovered/verified
-route template. No alternative endpoint is tried on failure. Live Azure DevOps
-compatibility, including collection completeness, remains unverified.
+version segment. The registration PUT uses that same route **with** the exact
+version segment, as the metadata GET does. These are **inferred routes**, not
+live-discovered/verified location templates. No alternative endpoint is tried on
+failure. Live Azure DevOps compatibility, including collection completeness and
+registration success/conflict semantics, remains an explicit experimental gate.
 
 ## Compare a local file before uploading
 
@@ -478,7 +519,8 @@ historical upload provenance. Catalog absence does not ensure publishability:
 deleted versions stay reserved and concurrent publishers can race.
 The algorithm follows the existing decoder and mock fixtures; **live Azure
 single-chunk and multi-level package interoperability remains unverified**.
-Full uploading/publishing and `add_package()` registration are still unavailable.
+Full uploading/publishing remains unavailable; registration of already-uploaded
+references is described below.
 
 ## Inspect package files and path history
 
@@ -604,6 +646,107 @@ Use explicit versions to bound the work. **Live inspection interoperability is
 unverified**, including service-produced raw/chunked manifests and inaccessible
 or deleted resources; fixture tests are not compatibility evidence.
 
+## Register already-uploaded content
+
+`add_package()` is the final metadata-registration step, **not** a substitute for
+uploading a directory. All content, its manifest/super-root, and suitable proof
+strings must already exist through a separately authorized upload workflow.
+The method performs no content upload, blob lookup, local file access, chunking,
+proof generation, retention, overwrite, or automatic reconciliation. It requires
+an open client, but **does not require an advertised Dedup service**.
+
+Read-only APIs need **Packaging: Read** and feed access. Registration needs a
+credential authorized for **Packaging: Read & write** and an appropriate feed
+publisher role (Feed Publisher/Contributor); read visibility alone is insufficient.
+PATs, `BearerToken`, and synchronous `TokenCredential` use the same explicit
+authentication conventions as downloads.
+
+All arguments are keyword-only:
+
+| Argument | Meaning |
+| --- | --- |
+| `feed` | Required feed name or ID. |
+| `name` | Required exact lowercase Universal Package name; nonconsecutive `-`, `_`, or `.` separators are allowed. |
+| `version` | Required exact Universal Package SemVer, including prereleases; no wildcards or build metadata. |
+| `metadata` | Required `PackagePushMetadata`, not a dictionary or another model. |
+| `scope` | `"organization"` (default) or `"project"`. |
+| `project` | Project name/ID required for project scope; omit for organization scope. |
+
+`metadata.manifest_id` and `metadata.super_root_id` must be supported dedup IDs:
+64 hexadecimal digits plus a `01` chunk or `02` node suffix. They are serialized
+in uppercase without mutating the model. `proof_nodes` must be a **tuple of
+strings**, not a list or a bare string. Proofs are opaque: order, duplicates, empty
+strings, and an empty tuple are preserved without asserting that the service will
+accept them as valid proofs. `description=None` **omits** the field; `description=""`
+sends an empty string. This matches the SDK model's
+[msrest serialization behavior](https://github.com/Azure/msrest-for-python/blob/master/msrest/serialization.py):
+None attributes are omitted, while empty strings/arrays are retained.
+The new body has camelCase `manifestId`, `superRootId`, and `proofNodes` keys, plus
+`description` when supplied. Invalid caller types/fields raise `TypeError` or
+`ValueError` before any network request, including resource discovery.
+
+This illustrative integration function accepts **pre-existing** references; it
+does not obtain them or upload files. Do not substitute invented IDs/proofs:
+
+```python
+from az_artifacts import PackagePushMetadata, UniversalPackageClient
+
+
+def register_uploaded_version(
+    client: UniversalPackageClient,
+    *,
+    existing_manifest_id: str,
+    existing_super_root_id: str,
+    existing_proof_nodes: tuple[str, ...],
+) -> None:
+    client.add_package(
+        feed="your-feed",
+        name="your-package",
+        version="1.2.3-rc.1",  # Choose an explicitly authorized, unreserved version.
+        metadata=PackagePushMetadata(
+            manifest_id=existing_manifest_id,
+            super_root_id=existing_super_root_id,
+            proof_nodes=existing_proof_nodes,
+            description=None,
+        ),
+        scope="project",
+        project="your-project",
+    )
+```
+
+### Acknowledgment, no replay, and uncertain outcomes
+
+The registration PUT makes **one attempt**, regardless of client `retries`.
+Transport errors, 429, and 5xx never cause automatic registration replay.
+Resource discovery is still a read and retains its normal retries; a discovery
+failure propagates before registration is attempted. Other reads, including the
+Dedup URL-resolution POST used by downloads, retain their retry behavior.
+Callers and custom transports must not independently replay the registration PUT.
+
+| Registration outcome | Result |
+| --- | --- |
+| HTTP **200, 201, or 204**, with no async/partial headers | Returns `None`. No response schema is deserialized; an empty body is valid, and a bounded nonempty body is ignored as in the SDK. A normal `Location` header on 201 is allowed. |
+| HTTP **409** | `ConflictError(ServiceError)` with status/request ID. Never treated as success or permission to overwrite. |
+| HTTP **401 / 403 / 404** | `AuthenticationError` / `PermissionDeniedError` / `NotFoundError`, not absence or success. |
+| Other **4xx except 408**, including **429** | `ServiceError`, no retry. These request rejections do not prove that a version is absent or reusable. |
+| HTTP **408**, **5xx**, or other nonacknowledging statuses (including **202**, **206**, **207**, and redirects) | `RegistrationOutcomeUnknownError`; no replay or alternate-path attempt. |
+| Async/partial signals even on 200/201/204 | `RegistrationOutcomeUnknownError` for nonempty `Azure-AsyncOperation`, `Operation-Location`, `Content-Range`, or `x-ms-continuationtoken` headers. No polling. |
+| Transport or response-protocol failure during the PUT, including timeout/disconnection, malformed encoding, or an oversized response | `RegistrationOutcomeUnknownError`, conservatively even for connection failures. |
+
+`RegistrationOutcomeUnknownError(ArtifactsError)` means **completion is not
+established and the version may already have committed**. It retains optional
+`status_code` and sanitized `request_id` when available; transport/protocol errors
+may have neither. Sanitized underlying library errors are retained as causes,
+without raw responses, URLs, credentials, or proofs.
+
+Versions are **immutable and reserved even after deletion**. Existence/comparison
+checks cannot authorize reuse or avoid races. After an uncertain outcome, stop
+automatic processing and explicitly inspect the intended package's metadata
+before deciding how to reconcile. Do not turn a subsequent 409 into success or
+automatically delete/recreate a version. Neither a catalog miss nor one matching
+file proves a registration succeeded. The PUT route and live response behavior
+remain experimental; fixture success is not service interoperability evidence.
+
 ## Azure CLI comparison and unsupported behavior
 
 This is a Python API, **not** a full reimplementation of
@@ -632,6 +775,7 @@ The complete download-command flag mapping is:
 | `--help`, `-h` | No command-line entry point; use this documentation and Python docstrings |
 | `--subscription` | No Azure subscription selection; configure your identity and organization explicitly |
 
+`add_package()` accepts a metadata description but does not upload content.
 There is no `publish()` method, upload CLI, `--description` publishing option,
 Azure CLI login/configuration integration, or Azure DevOps Server support.
 
@@ -700,6 +844,25 @@ and a missing path with `file_exists()`, and bound `list_file_versions()` to kno
 exact versions (including a prerelease when available). Repeat against authorized
 organization- and project-scoped fixtures, with raw and chunked manifests.
 Those inspection calls create no local files and do not prove payload availability.
+For catalog/metadata checks, compare accessible feed/project associations,
+version lists (including prereleases/deletion states), optional intent behavior,
+and exact metadata with Microsoft's tooling or known service fixtures. Verify
+collection completeness and inaccessible/deleted-resource errors explicitly.
+For comparison, use `compare_file()` with known unchanged local fixture files:
+exercise a match, same-size different bytes, and a different size against both
+single-chunk and multi-level dedup files. Keep the source stable during each call;
+compare represented content, not current payload availability.
+
+### Separate registration interoperability gate
+
+Live registration requires **separate explicit authorization** for a disposable,
+unreserved package version and valid pre-uploaded manifest/root/proof references,
+coordinated with [issue #2](https://github.com/cataggar/az-artifacts/issues/2).
+Do not extend the read-only smoke above to upload, register, retry, or delete
+anything automatically. Verify the service location template and actual
+acknowledgment/conflict/error responses before claiming compatibility.
+No live registration or read-only smoke evidence is claimed here; the complete
+local implementation and fixture coverage do not remove these release gates.
 
 ## Releasing the Python distribution to PyPI
 
@@ -711,11 +874,12 @@ building and smoke-installing the wheel and source distribution. A separate
 publish job downloads those build artifacts and uses OIDC Trusted Publishing
 inside the `pypi` environment. There are no PyPI password/API-token secrets.
 
-**Maintainer setup is required before the first release:**
+**Maintainer checklist for subsequent releases or a fork:**
 
-1. Verify the `az-artifacts` PyPI name is available and configure a PyPI project
-   or pending Trusted Publisher.
-2. Configure the GitHub Trusted Publisher on PyPI with owner `cataggar`,
+1. PyPI `az-artifacts` 0.1.0 is already released (download-only). Choose a new
+   version for any later release; do not reuse `v0.1.0`. Forks need their own
+   available distribution name and PyPI project or pending Trusted Publisher.
+2. Verify the GitHub Trusted Publisher on PyPI with owner `cataggar`,
    repository `az-artifacts`, workflow filename **`pypi.yml`**, and environment
    **`pypi`**. Adjust owner/repository if maintaining a fork.
 3. Create the GitHub **`pypi`** environment and restrict deployment to release

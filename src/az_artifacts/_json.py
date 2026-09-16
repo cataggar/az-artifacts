@@ -1,4 +1,4 @@
-"""Strict decoding of the small subset of Azure DevOps models we consume."""
+"""Strict decoding and registration serialization for supported Azure DevOps models."""
 
 import re
 from datetime import UTC, datetime
@@ -212,6 +212,41 @@ def package_push_metadata(value: object) -> PackagePushMetadata:
         ),
         description=optional_string(obj.get("description"), "package description"),
     )
+
+
+def _push_blob_id(value: object, label: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{label} must be a string")
+    try:
+        return blob_id(value)
+    except ProtocolError:
+        raise ValueError(
+            f"{label} must be a supported dedup blob ID (64 hex digits plus 01 or 02)"
+        ) from None
+
+
+def serialize_package_push_metadata(metadata: PackagePushMetadata) -> dict[str, object]:
+    """Validate caller data and create a new SDK-shaped body without mutating it."""
+    if not isinstance(metadata, PackagePushMetadata):
+        raise TypeError("metadata must be PackagePushMetadata")
+    manifest_id = _push_blob_id(metadata.manifest_id, "manifest_id")
+    super_root_id = _push_blob_id(metadata.super_root_id, "super_root_id")
+    if not isinstance(metadata.proof_nodes, tuple) or not all(
+        isinstance(proof, str) for proof in metadata.proof_nodes
+    ):
+        raise TypeError("proof_nodes must be a tuple of strings")
+    if metadata.description is not None and not isinstance(metadata.description, str):
+        raise TypeError("description must be a string or None")
+    body: dict[str, object] = {}
+    # msrest omits None model attributes, but retains empty strings and arrays.
+    if metadata.description is not None:
+        body["description"] = metadata.description
+    body.update(
+        manifestId=manifest_id,
+        proofNodes=list(metadata.proof_nodes),
+        superRootId=super_root_id,
+    )
+    return body
 
 
 def package_version_deletion_state(value: object) -> PackageVersionDeletionState:

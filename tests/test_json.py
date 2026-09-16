@@ -27,6 +27,7 @@ from az_artifacts._json import (
     package_version,
     package_version_deletion_state,
     project_reference,
+    serialize_package_push_metadata,
 )
 from az_artifacts.errors import ProtocolError
 
@@ -143,6 +144,24 @@ def test_push_metadata_keeps_opaque_proof_strings():
 def test_invalid_proof_nodes(proof_nodes):
     with pytest.raises(ProtocolError, match="proof"):
         package_push_metadata(PUSH_METADATA | {"proofNodes": proof_nodes})
+
+
+@pytest.mark.parametrize("description", [None, "", "Description"])
+@pytest.mark.parametrize("proofs", [(), ("",), ("opaque proof", "", "opaque proof")])
+def test_push_serialization_round_trip_and_independent_body(description, proofs):
+    metadata = PackagePushMetadata(CHUNK, NODE, proofs, description)
+    wire = serialize_package_push_metadata(metadata)
+    assert wire["manifestId"] == CHUNK.upper()
+    assert wire["superRootId"] == NODE.upper()
+    assert wire["proofNodes"] == list(proofs)
+    assert ("description" in wire) == (description is not None)
+    assert package_push_metadata(wire) == PackagePushMetadata(
+        CHUNK.upper(), NODE.upper(), proofs, description
+    )
+    assert isinstance(wire["proofNodes"], list)
+    wire["proofNodes"].append("new proof")
+    assert metadata.proof_nodes == proofs
+    assert serialize_package_push_metadata(metadata)["proofNodes"] == list(proofs)
 
 
 @pytest.mark.parametrize(
