@@ -8,7 +8,7 @@
   },
   "bytes_uploaded": 104957027,
   "native_download": "all approved sizes and SHA256 hashes verified",
-  "microsoft_download": "all approved sizes and SHA256 hashes verified",
+  "artifacttool_download": "all approved sizes and SHA256 hashes verified",
   "files": [
     {
       "path": "payload.bin",

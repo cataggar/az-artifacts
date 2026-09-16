@@ -75,7 +75,7 @@ foreach (string name in new[] {
                 root = Convert.ToHexString(root), chunks });
         }
         Console.WriteLine(JsonSerializer.Serialize(new {
-            source = "Microsoft ArtifactTool 0.2.574 installed public BuildXL hashing API; local synthetic inputs only",
+            source = "ArtifactTool 0.2.574 installed public BuildXL hashing API; local synthetic inputs only",
             seed = "az-artifacts local chunker vectors v1",
             recipe = "seeded parts restart SHA256(UTF8(seed) + NUL + uint64_le(i)) at i=0; zero parts contain zero bytes",
             vectors = output

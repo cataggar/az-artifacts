@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-from interop import microsoft_download
+from interop import artifacttool_download
 
 
 @pytest.mark.parametrize("status", [0, 1])
@@ -21,7 +21,7 @@ def test_reference_helper_is_download_only_and_withholds_output(
             returncode=status, stdout=b"never-record-signed-url", stderr=b"never-record-token"
         )
 
-    monkeypatch.setattr(microsoft_download.subprocess, "run", run)
+    monkeypatch.setattr(artifacttool_download.subprocess, "run", run)
     args = {
         "organization": "https://dev.azure.com/org",
         "project": "project",
@@ -34,10 +34,10 @@ def test_reference_helper_is_download_only_and_withholds_output(
     }
     if status:
         with pytest.raises(RuntimeError) as caught:
-            microsoft_download.download_package(**args)
+            artifacttool_download.download_package(**args)
         assert "never-record" not in str(caught.value)
     else:
-        assert microsoft_download.download_package(**args)["exit_code"] == 0
+        assert artifacttool_download.download_package(**args)["exit_code"] == 0
     command, kwargs = calls[0]
     assert command[1:3] == ["universal", "download"]
     assert "publish" not in command and args["token"] not in command

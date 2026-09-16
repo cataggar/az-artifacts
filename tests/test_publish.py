@@ -1,7 +1,7 @@
 """Fault-injection simulator using captured shapes, NOT a remote interop claim.
 
 Receipts here are synthetic SHA256 values with no service authority. The actual
-capture and local Microsoft SDK formatter vectors are checked separately.
+capture and local ArtifactTool SDK formatter vectors are checked separately.
 """
 
 import base64

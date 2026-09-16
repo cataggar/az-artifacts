@@ -59,15 +59,15 @@ def test_live_native_roundtrip_matches_exact_cold_approval_and_is_complete():
     assert proposal["approved"] is False and proposal["fixture_only"] is True
     assert proposal["completed"] is True
     assert result["files"] == proposal["files"]
-    assert result["native_download"] == result["microsoft_download"]
+    assert result["native_download"] == result["artifacttool_download"]
     assert result["native_download"] == "all approved sizes and SHA256 hashes verified"
     assert sum(item["size"] for item in result["files"]) == 104988672
     hashes = json.loads((FIXTURES / "native-roundtrip-hashes.json").read_text())
-    assert hashes["source"] == hashes["native"] == hashes["microsoft"] == proposal["files"]
-    microsoft_requests = [
+    assert hashes["source"] == hashes["native"] == hashes["artifacttool"] == proposal["files"]
+    artifacttool_requests = [
         json.loads(line) for line in (FIXTURES / "native-download.jsonl").read_text().splitlines()
     ]
-    assert not any(row.get("method") in ("PUT", "PATCH", "DELETE") for row in microsoft_requests)
+    assert not any(row.get("method") in ("PUT", "PATCH", "DELETE") for row in artifacttool_requests)
 
 
 def test_native_capture_contains_no_auth_or_signed_blob_paths():

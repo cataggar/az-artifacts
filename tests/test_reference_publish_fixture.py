@@ -1,4 +1,4 @@
-"""Normalized Microsoft-tool captures; identities and dates are synthetic."""
+"""Normalized ArtifactTool captures; identities and dates are synthetic."""
 
 import base64
 import hashlib
@@ -187,6 +187,16 @@ def test_reference_runner_rejects_public_fixture_writes(monkeypatch):
                 str(FIXTURES / "protocol_evidence.json"),
             ]
         )
+
+
+@pytest.mark.parametrize("publisher", [None, "artifacttool"])
+def test_reference_gate_accepts_artifacttool_proposals(publisher):
+    from interop.reference_tool import check_publish_allowed
+
+    proposal = {"approved": True}
+    if publisher is not None:
+        proposal["publisher"] = publisher
+    check_publish_allowed(proposal)
 
 
 def test_reference_gate_rejects_unapproved_and_native_only_proposals():

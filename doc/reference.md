@@ -129,7 +129,7 @@ Registration uses the [public SDK's][upack-push-client] four
 
 Reference-only instrumentation is under `tests/interop`. It does not modify TLS,
 trust, or proxy settings, and does not retain credentials, signed URLs, opaque
-receipts, or raw tool logs. Microsoft tooling is never invoked by the library.
+receipts, or raw tool logs. ArtifactTool is never invoked by the library.
 
 Completed immutable experiments must never be republished. To inspect the
 normalized native fixture without any network or write:
@@ -147,7 +147,7 @@ Include `files` entries with package-relative `path`, `size`, and `sha256`, plus
 `publisher: "native-python"` and `approved: true` only after that exact proposal
 is approved. Do not copy completion flags or treat a fixture as approval.
 
-With the Microsoft download reference and locally built capture hook ready, pass
+With the ArtifactTool download reference and locally built capture hook ready, pass
 `--proposal .interop-local/proposal.json --execute-approved`. Credentials come
 only from the process-local `AZ_ARTIFACTS_REFERENCE_TOKEN`. The optional pytest
 live test additionally requires `AZ_ARTIFACTS_RUN_APPROVED_NATIVE_INTEROP=1` and
@@ -156,15 +156,15 @@ and objects marked `fixture_only` are rejected. An exclusive attempt marker
 prevents blind retries; all new evidence stays ignored, never overwriting public
 fixtures. Native publishing is followed by both downloaders and exact hash checks.
 
-`reference_tool.py` likewise requires `--proposal`, and Microsoft reference writes
-additionally require `--execute-approved` with `publisher: "microsoft-artifacttool"`.
+`reference_tool.py` likewise requires `--proposal`, and ArtifactTool reference writes
+additionally require `--execute-approved` with `publisher: "artifacttool"`.
 Its preflight uses the proposal organization's discovered package service, not a
 hardcoded destination. `bicep_retention.py` requires its own proposal with
 `publisher: "native-retention-only"` and `--execute-approved`; dedup writes are
 still writes even when registration is disabled. Never run these against production.
 
-For Microsoft **download-only** verification of another approved project-feed
-package, `tests/interop/microsoft_download.py` accepts `--organization`, `--project`,
+For ArtifactTool **download-only** verification of another approved project-feed
+package, `tests/interop/artifacttool_download.py` accepts `--organization`, `--project`,
 `--feed`, `--name`, `--version`, explicit `--tool`, and an empty `--path`. It reads
 `AZ_ARTIFACTS_REFERENCE_TOKEN` only from the process environment, fixes the command
 to `universal download`, and withholds raw tool stdout/stderr. Optional
@@ -1011,7 +1011,7 @@ organization- and project-scoped fixtures, with raw and chunked manifests.
 Those inspection calls create no local files and do not prove payload availability.
 For catalog/metadata checks, compare accessible feed/project associations,
 version lists (including prereleases/deletion states), optional intent behavior,
-and exact metadata with Microsoft's tooling or known service fixtures. Verify
+and exact metadata with ArtifactTool or known service fixtures. Verify
 collection completeness and inaccessible/deleted-resource errors explicitly.
 For comparison, use `compare_file()` with known unchanged local fixture files:
 exercise a match, same-size different bytes, and a different size against both
@@ -1064,13 +1064,13 @@ publish any Universal Package to an Azure Artifacts feed.
 
 ## License and provenance
 
-MIT licensed. The native download implementation is based on the Microsoft
+MIT licensed. The native download implementation is based on the
 MIT-licensed Rust code in
 `../azure-devops-rust-api/azure_devops_rust_api/src/artifacts_download`, including
 its Universal Package metadata, deduplication, and decompression protocol work.
 The native chunker and packed-tree builder are adapted from MIT-licensed BuildXL;
-the typed node format and content hashes also follow Microsoft's
+the typed node format and content hashes also follow the
 [BuildXL hashing implementation](https://github.com/microsoft/BuildXL/tree/main/Public/Src/Cache/ContentStore/Hashing).
-The exact upstream Microsoft license and copyright notice are retained in the
+The exact upstream license and copyright notice are retained in the
 root [LICENSE](../LICENSE); preserve that notice when redistributing derived code.
-This Python implementation is not an official Microsoft SDK.
+This Python implementation is not an official Azure DevOps SDK.

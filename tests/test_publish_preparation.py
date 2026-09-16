@@ -1,4 +1,4 @@
-"""Pure-Python preparation checked against Microsoft-generated, offline vectors."""
+"""Pure-Python preparation checked against ArtifactTool-generated, offline vectors."""
 
 import base64
 import hashlib
@@ -34,7 +34,7 @@ class ShortReads(io.BytesIO):
 
 
 @pytest.mark.parametrize("vector", VECTORS["vectors"], ids=lambda case: case["name"])
-def test_chunking_and_roots_match_local_microsoft_sdk(vector, tmp_path):
+def test_chunking_and_roots_match_local_artifacttool_sdk(vector, tmp_path):
     data = b"".join(
         bytes(part["length"])
         if part["kind"] == "zeros"

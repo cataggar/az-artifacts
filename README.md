@@ -55,4 +55,4 @@ print(result.files)
 ## License
 
 [MIT](LICENSE). See [provenance](doc/reference.md#license-and-provenance) for
-upstream attribution. This is not an official Microsoft SDK.
+upstream attribution. This is not an official Azure DevOps SDK.

@@ -49,7 +49,7 @@ def main(argv=None):
     reference_tool.verify_files(source, proposal["files"])
     reference_tool.reference_tool_path(proposal)
     if not reference_tool.HOOK.is_file():
-        raise RuntimeError("Microsoft-tool download reference and capture hook must be ready")
+        raise RuntimeError("ArtifactTool download reference and capture hook must be ready")
     token = os.environ.get("AZ_ARTIFACTS_REFERENCE_TOKEN")
     if not token:
         raise RuntimeError("A process-local native interoperability credential is required")
@@ -100,9 +100,9 @@ def main(argv=None):
                 overwrite=False,
             )
             reference_tool.verify_files(downloaded.path, proposal["files"])
-        microsoft_exit = reference_tool.main(["download", "--proposal", args.proposal])
-        if microsoft_exit:
-            raise RuntimeError("Microsoft-tool native-package verification failed")
+        artifacttool_exit = reference_tool.main(["download", "--proposal", args.proposal])
+        if artifacttool_exit:
+            raise RuntimeError("ArtifactTool native-package verification failed")
     except ArtifactsError as error:
         print(
             json.dumps(
@@ -120,7 +120,7 @@ def main(argv=None):
         "metadata": asdict(result.metadata),
         "bytes_uploaded": result.bytes_uploaded,
         "native_download": "all approved sizes and SHA256 hashes verified",
-        "microsoft_download": "all approved sizes and SHA256 hashes verified",
+        "artifacttool_download": "all approved sizes and SHA256 hashes verified",
         "files": proposal["files"],
         "transfer": publication["transfer"],
     }

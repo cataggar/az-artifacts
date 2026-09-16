@@ -52,7 +52,7 @@ def receipts(value: object, allowed: set[str]) -> dict[str, Receipt]:
 
 
 def summary_headers(children: tuple[BlobRef, ...], known: dict[str, Receipt]) -> dict[str, str]:
-    # The public Microsoft SDK formatter hashes the ordered child signatures.
+    # The public ArtifactTool SDK formatter hashes the ordered child signatures.
     signatures = hashlib.sha256()
     dates = []
     for child in children:

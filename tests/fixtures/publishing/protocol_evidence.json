@@ -88,7 +88,7 @@
       "service_package_size": 219,
       "proof_encoding": "base64 serialized nodes: file-tree node, then super-root",
       "native_download": "verified",
-      "microsoft_tool_download": "verified",
+      "artifacttool_download": "verified",
       "native_upload": "not attempted",
       "large_package_interoperability": "not established"
     }
@@ -101,7 +101,7 @@
     "manifest_publish_call_site": "https://github.com/microsoft/azure-pipelines-agent/blob/8853a22f5bc48094641eb284c731f3670235df29/src/Agent.Plugins/Artifact/PipelineArtifactServer.cs"
   },
   "local_sdk_evidence": {
-    "method": "Public installed Microsoft SDK APIs with a terminal in-memory HttpMessageHandler; no network, no real receipts, no implementation disassembly.",
+    "method": "Public installed ArtifactTool SDK APIs with a terminal in-memory HttpMessageHandler; no network, no real receipts, no implementation disassembly.",
     "wire_vectors": "sdk-wire-vectors.json",
     "chunker_vectors": "sdk-chunk-vectors.json",
     "chunk_header": "X-ms-chunk-{id}: {length}/false for uncompressed bytes, in concatenated request-body order",
@@ -122,7 +122,7 @@
   "unresolved_contracts": [
     "Development-only native smoke and public-tool package roundtrips were verified; this does not establish production reliability.",
     "Write failures and ambiguous registration remain covered by offline fault injection rather than deliberately induced live faults. Nonempty InsufficientKeepUntil and rich node acknowledgments were observed during Bicep retention diagnosis.",
-    "More-than-512-file collection proofs and chunked manifests have offline coverage, not a captured Microsoft registration.",
+    "More-than-512-file collection proofs and chunked manifests have offline coverage, not a captured ArtifactTool registration.",
     "Only the observed legacy dedup endpoint is implemented; other domain/session transfer protocols are not claimed."
   ],
   "bicep_retention_discovery": {
@@ -151,11 +151,11 @@
       "registration_status": 204,
       "registration_attempts": 1,
       "captured_requests": 45,
-      "microsoft_download": "all three file sizes and SHA256 hashes verified",
+      "artifacttool_download": "all three file sizes and SHA256 hashes verified",
       "native_download": "all three file sizes and SHA256 hashes verified",
       "native_download_fixture": "next-reference-verification.json",
       "native_download_notes": "A no-retry attempt encountered HTTP 503. Final verification passed using the shared bounded chunk-prefetch pool and safe read retries.",
-      "native_preparation": "all 1364 payload chunk boundaries and hashes, full manifest, roots, and proof nodes match the Microsoft reference",
+      "native_preparation": "all 1364 payload chunk boundaries and hashes, full manifest, roots, and proof nodes match the ArtifactTool reference",
       "payload_chunks": 1364,
       "payload_root_children": 342,
       "full_512_child_nodes": 2,
@@ -200,7 +200,7 @@
       "Recover chunk framing and successful retention response contracts missing from the first capture.",
       "Observe multi-chunk, compressible, empty-file, multi-file manifest, and proof behavior.",
       "The 100 MiB synthetic payload exercises more than 512 chunks and deeper trees.",
-      "This Microsoft reference experiment does not verify native publishing; actual-tool native interoperability still requires separate approval."
+      "This ArtifactTool reference experiment does not verify native publishing; actual-tool native interoperability still requires separate approval."
     ],
     "capture_readiness": {
       "format": 2,
@@ -233,11 +233,11 @@
     "executed": true,
     "registration_confirmed": true,
     "sanitized_native_http": "native-python-http-1.jsonl",
-    "roundtrip_verification": "native and Microsoft-tool downloads both match the exact approved file inventory, sizes, and SHA256 hashes",
+    "roundtrip_verification": "native and ArtifactTool downloads both match the exact approved file inventory, sizes, and SHA256 hashes",
     "completed": true,
     "result_evidence": "native-publish-result.json",
     "independent_download_hashes": "native-roundtrip-hashes.json",
-    "microsoft_download_evidence": "native-download.jsonl",
+    "artifacttool_download_evidence": "native-download.jsonl",
     "organization": "https://dev.azure.com/fixtureorg",
     "scope": "project",
     "project": "fixture-project",
@@ -268,7 +268,7 @@
       }
     ],
     "scope_of_experiment": [
-      "Only native publishing to this new immutable version, followed by read-only native and Microsoft-tool downloads, is proposed.",
+      "Only native publishing to this new immutable version, followed by read-only native and ArtifactTool downloads, is proposed.",
       "The newly seeded 100 MiB payload is intended to exercise missing-content uploads rather than a warm-only reference reuse. The empty and zero-filled control files intentionally retain their existing contents.",
       "Real native-tool packages require their own exact previews and explicit approval; this proposal alone does not authorize them."
     ],
@@ -277,7 +277,7 @@
   "reference_publish_proposal": {
     "approved": false,
     "completed": true,
-    "purpose": "Capture a sanitized Microsoft-tool reference transcript; this is not a native publish.",
+    "purpose": "Capture a sanitized ArtifactTool reference transcript; this is not a native publish.",
     "organization": "https://dev.azure.com/fixtureorg",
     "scope": "project",
     "project": "fixture-project",

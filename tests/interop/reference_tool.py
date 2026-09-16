@@ -1,6 +1,6 @@
 """Explicitly gated reference experiments; never imported by the Python library.
 
-Requires the existing Microsoft ArtifactTool and the locally built diagnostic hook.
+Requires the existing ArtifactTool and the locally built diagnostic hook.
 Credentials and tool output stay in memory. Capture output is sanitized in-process.
 """
 
@@ -48,7 +48,7 @@ def evidence_directory(proposal: dict) -> Path:
 def reference_tool_path(proposal: dict) -> Path:
     path = Path(proposal["artifacttool_path"]).resolve()
     if not path.is_file():
-        raise RuntimeError("Provide the path to an existing Microsoft ArtifactTool")
+        raise RuntimeError("Provide the path to an existing ArtifactTool")
     return path
 
 
@@ -70,7 +70,7 @@ def verify_files(source: Path, expected: list[dict[str, object]]) -> None:
 def check_publish_allowed(proposal: dict[str, object]) -> None:
     if proposal.get("fixture_only"):
         raise RuntimeError("Public fixtures are not live proposals or write authority")
-    if proposal.get("publisher", "microsoft-artifacttool") != "microsoft-artifacttool":
+    if proposal.get("publisher", "artifacttool") != "artifacttool":
         raise RuntimeError("This harness cannot publish a native-only proposal")
     if proposal.get("completed") or proposal.get("executed"):
         raise RuntimeError("The immutable reference publish is already completed")

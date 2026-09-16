@@ -1,4 +1,4 @@
-"""Read-only Microsoft-tool download helper; never exposes raw tool output."""
+"""Read-only ArtifactTool download helper; never exposes raw tool output."""
 
 import argparse
 import json
@@ -18,10 +18,10 @@ def download_package(
     """Download only; callers must compare files against their reviewed hashes."""
     destination = Path(path).resolve()
     if destination.exists() and any(destination.iterdir()):
-        raise FileExistsError("Microsoft reference downloads require an empty destination")
+        raise FileExistsError("ArtifactTool downloads require an empty destination")
     tool = Path(tool).resolve()
     if not token or not tool.is_file():
-        raise RuntimeError("An existing Microsoft tool and process-local credential are required")
+        raise RuntimeError("An existing ArtifactTool and process-local credential are required")
     env = os.environ.copy()
     env["AZ_ARTIFACTS_REFERENCE_TOKEN"] = token
     env["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1"
@@ -62,7 +62,7 @@ def download_package(
         check=False,
     )
     if result.returncode:
-        raise RuntimeError(f"Microsoft reference download failed (exit {result.returncode})")
+        raise RuntimeError(f"ArtifactTool download failed (exit {result.returncode})")
     return {"download": "completed", "path": str(destination), "exit_code": 0}
 
 
@@ -76,7 +76,7 @@ def main():
     try:
         result = download_package(**args)
     except (OSError, RuntimeError, ValueError):
-        print("Microsoft reference download failed; raw tool output was withheld.")
+        print("ArtifactTool download failed; raw tool output was withheld.")
         return 1
     print(json.dumps(result))
     return 0

@@ -101,5 +101,5 @@
       "body": "0000000000030000DDAF35A193617ABACC417349AE20413112E6FA4E89A97EA20A9EEEE64B55D39A"
     }
   ],
-  "source": "Public Microsoft ArtifactTool 0.2.574 SDK formatter; in-memory terminal handler, synthetic inputs, no network and no real receipts"
+  "source": "Public ArtifactTool 0.2.574 SDK formatter; in-memory terminal handler, synthetic inputs, no network and no real receipts"
 }
