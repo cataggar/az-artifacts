@@ -419,8 +419,9 @@ class UniversalPackageClient:
         name or ID, which must otherwise be omitted. Entries retain service order,
         including prereleases. Requires an open client, but not a Dedup service;
         no blobs or files are read or written. Unsupported continuation/partial
-        responses raise ProtocolError. The versionless route is experimental and
-        has not been verified against a live service.
+        responses raise ProtocolError. The versionless route has been verified
+        against independent live REST baselines in both feed scopes, using names
+        and IDs. Unsupported or incomplete service responses still fail explicitly.
         """
         self._validate_package(feed, name)
         _validate_scope(scope, project)
@@ -470,7 +471,8 @@ class UniversalPackageClient:
         reconciliation occurs: explicitly verify intended metadata after an
         unknown outcome, and never interpret a later 409 as success. Callers and
         custom transports must not replay the PUT automatically either.
-        This SDK-location-derived route remains experimental and live-unverified.
+        Acknowledgment and conflict behavior have been exercised live for a
+        project-scoped feed; organization-scoped registration remains unverified.
         """
         self._validate_package(feed, name)
         _validate_scope(scope, project)

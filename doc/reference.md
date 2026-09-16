@@ -19,6 +19,7 @@ command-line entry point.
 - [File comparison](#compare-a-local-file-before-uploading)
 - [File inspection and history](#inspect-package-files-and-path-history)
 - [Registration](#register-already-uploaded-content)
+- [Opt-in live API acceptance](#opt-in-live-api-acceptance)
 - [Azure CLI comparison](#azure-cli-comparison-and-unsupported-behavior)
 - [Development](#development-and-verification)
 - [Releases](#releasing-the-python-distribution-to-pypi)
@@ -173,6 +174,319 @@ Always compare downloaded files with the reviewed package hashes.
 [upack-push-client]: https://github.com/microsoft/azure-devops-python-api/blob/86c9a559fc4ab309df21e674b236a542f9e77f89/azure-devops/azure/devops/v7_1/upack_packaging/upack_packaging_client.py
 [upack-push-model]: https://github.com/microsoft/azure-devops-python-api/blob/86c9a559fc4ab309df21e674b236a542f9e77f89/azure-devops/azure/devops/v7_1/upack_packaging/models.py
 [buildxl-hashing]: https://github.com/microsoft/BuildXL/tree/16e96dc02e86c23afdc6114b0126b4d8549a41e1/Public/Src/Cache/ContentStore/Hashing
+
+## Opt-in live API acceptance
+
+The issue 3 harness is separate from publishing:
+
+- `tests/interop/issue3_readonly.py` exercises every catalog, metadata, inspection,
+  history and comparison API against **independent** expectations.
+- `tests/interop/issue3_registration.py` exercises public `add_package`, not
+  `publish`. It never uploads or creates proofs.
+- `tests/test_issue3_interop.py` tests these harnesses offline and supplies two
+  separately gated live pytest entry points. Ordinary CI makes no live calls.
+
+The parity reference is the three operations and five model shapes in
+[`v7_1/upack_packaging` at `86c9a559`][upack-push-client].
+The harness does not change or guess service endpoints. In particular, a failure
+of the versionless metadata route is a failure, not permission to
+substitute a catalog call. A synthetic test pass is **not** evidence of live
+compatibility.
+
+### Private inputs and an executable synthetic example
+
+Use an explicitly supplied, existing **private directory outside every Git
+worktree**. This harness does not use `.interop-local`, change existing publishing
+helper policy, or accept public fixtures as live configuration. Configs, baselines,
+decoded manifest/node captures, controls, proposals, and evidence all belong
+under that directory. Paths within a config may be relative to that directory;
+CLI paths should be absolute. Git ancestors, path escapes and nested worktrees
+are rejected. Protect that directory with appropriate local access controls.
+
+With the checkout's development environment available, the following generates
+an exact, complete **synthetic** schema example without credentials or network:
+
+```powershell
+$env:PYTHONPATH = 'src;tests'
+.\.venv\Scripts\python.exe tests\interop\issue3_example.py `
+  --private-directory 'C:\private\issue3'
+```
+
+`C:\private\issue3` is an illustrative caller-selected directory, not a default.
+The generator exclusively creates `config.example.json`, `baseline.example.json`,
+and tiny `sources` controls. The example contains both scopes, both name/ID
+addressing forms, all API cases, exact stable/prerelease versions, empty/raw-chunk/
+multichunk/multilevel file controls, raw/chunked manifests, and absent-version/path
+cases. Its intentionally unavailable inaccessible/deleted cases are explicit
+coverage gaps. **`fixture_only: true` cannot authorize live calls or writes.**
+Create a separate real config and baseline; do not relabel synthetic data as real
+evidence.
+
+The read-only config schema is:
+
+| Field | Required value |
+| --- | --- |
+| `schema`, `kind`, `fixture_only` | `1`, `"issue3-readonly"`, `false` |
+| `organization` | Explicit authorized organization URL |
+| `credential_env`, `credential_kind` | Environment-variable **name**, and `"bearer"` or `"pat"` |
+| `services` | Independently captured service roots keyed by `feeds`, `packaging`, `dedup`; HTTPS URLs without query strings |
+| `baseline_file` | Path to the separate baseline JSON under the private directory |
+| `evidence_directory` | New directory name/path under the private directory; must not already exist |
+| `limits` | All seven positive integer budgets shown below |
+| `targets` | Feed contexts described below |
+| `cases` | Ordered explicit case requests described below |
+
+Example limits (these are ceilings, not targets):
+
+```json
+{
+  "requests": 2000,
+  "items": 10000,
+  "seconds": 600,
+  "response_bytes": 4194304,
+  "total_bytes": 67108864,
+  "manifest_bytes": 4194304,
+  "cases": 200
+}
+```
+
+Budgets cover actual requests including redirects, cumulative catalog/oracle items,
+individual response bytes and aggregate response/oracle bytes. A local control
+must individually fit `total_bytes`. Iteration must exhaust normally, not stop
+at a passing prefix. Deadline checks occur before requests, during response and
+control reads, and during fixture traversal; per-request timeouts shrink to the
+remaining budget. As with synchronous sockets/filesystem I/O, this is not a
+hard real-time process-kill deadline.
+
+Each target contains:
+
+```json
+{
+  "scope": "project",
+  "feed": {
+    "name": "fixture-project-feed",
+    "id": "22222222-2222-4222-8222-222222222222"
+  },
+  "project": {
+    "name": "fixture-project",
+    "id": "33333333-3333-4333-8333-333333333333"
+  },
+  "package_ids": {
+    "fixture-package": "11111111-1111-4111-8111-111111111111"
+  }
+}
+```
+
+Also supply an organization-scoped target, omitting `project`. `package_ids`
+contains independently established package-name-to-ID mappings, not native
+discovery results. Each case has `target` (zero-based index), `addressing` (`name`
+or `id`), `method` (one of the ten read APIs), and `args` (API keyword arguments,
+**excluding** feed/scope/project). The runner supplies those from the target.
+For example:
+
+```json
+{
+  "target": 0,
+  "addressing": "id",
+  "method": "list_packages",
+  "args": {"name_query": "fixture-package", "page_size": 1}
+}
+```
+
+Use an approved bounded substring with **at least two matching existing packages**
+for each listing case; `page_size` must be `1`. `list_file_versions` requires a
+nonempty, explicitly bounded `versions` array for one package. `compare_file`
+requires a private `local_path` and package-relative `relative_path`. Use a
+same-size changed local control to distinguish content identity from size/path
+equality. Existing substantial packages can supply multi-level trees; no new
+huge package is required.
+
+The baseline schema contains `schema: 1`, `fixture_only: false`, `provenance`,
+`cases`, and `manifests`. `provenance` must have:
+
+```json
+{
+  "kind": "rest",
+  "independent_of_native": true,
+  "complete": true,
+  "reference": "Privately recorded independent REST or pinned SDK observation"
+}
+```
+
+Allowed provenance kinds are `rest`, `sdk`, and `approved-fixture`. Native output
+is never ground truth. Normalize independent REST/SDK data into the public
+dataclass field names: include optional fields as JSON null, use arrays for
+tuples, POSIX strings for logical paths, and ISO timestamps with `+00:00` for UTC.
+Keep exact service order, prereleases, descriptions (including empty/null values),
+and the **server's** limited-metadata `count`, even when different from array
+length. This normalization is the caller's independently reviewed baseline, not
+a second native call.
+
+Each baseline `cases[i]` binds to exactly `config.cases[i]` through a `request`
+copy and contains either:
+
+- `expected`: the complete normalized result (including booleans), or
+- `error`: an expected public error class name, and `status_code` for HTTP errors.
+  Errors can be `AuthenticationError`, `PermissionDeniedError`, `NotFoundError`,
+  `PackageNotFoundError`, `ProtocolError`, `IntegrityError`, or `TransportError`.
+  Also supply `operation`, the expected failed stage: `discovery`, `feeds`,
+  `packages`, `versions`, `metadata`, `limited-metadata`, `resolver`, or
+  `manifest-or-node`. A discovery failure cannot establish an inaccessible feed.
+
+For inspection/history/comparison, `manifests` is an array of indices into the
+top-level manifest captures used by that case. A capture has `manifest_id` and
+`blobs`: a map from uppercase content IDs to base64 **decoded** manifest chunks
+and serialized Dedup nodes. Include every manifest node/leaf and every file-tree
+node, but **no file payload chunks**. The independent decoder verifies content
+hashes, recursively assembles the manifest, and derives permitted IDs; it does
+not trust an arbitrary caller-provided blob allow-list. Thus manifest leaf chunks
+are correctly allowed without allowing file-payload reads. Missing node captures
+are incomplete, not successes.
+
+A comparison baseline additionally has `local_control: {"size": 3, "sha256":
+"<independently established SHA-256>"}`. Optional `condition` identifies
+`existing-version`, `existing-path`, `missing-version`, `missing-path`,
+`inaccessible`, or `deleted` using independent fixture knowledge. A known
+inaccessible resource may return a masking 404; an arbitrary unknown 404 is not
+an inaccessible fixture. For unavailable cases, omit the case or use a null
+baseline entry: the required coverage stays **incomplete**.
+
+### Running the authorized read-only matrix
+
+Supply the token only through the named process environment variable; never put
+it in JSON or command arguments. After independently verifying the development
+targets and baselines:
+
+```powershell
+$env:AZ_ARTIFACTS_RUN_READONLY_INTEROP = '1'
+$env:PYTHONPATH = 'src;tests'
+.\.venv\Scripts\python.exe tests\interop\issue3_readonly.py `
+  --private-directory 'C:\private\issue3' `
+  --config 'C:\private\issue3\readonly.json' --execute-readonly
+```
+
+For pytest, additionally set `AZ_ARTIFACTS_PRIVATE_DIRECTORY` and
+`AZ_ARTIFACTS_READONLY_CONFIG` to those explicit absolute paths, then run:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\test_issue3_interop.py `
+  -k test_live_readonly_acceptance -q --tb=short
+```
+
+The report contains fixed numbered case IDs and fixed coverage IDs with
+`pass`, `fail`, or `incomplete`; any non-pass exits nonzero. All ten methods must
+pass in both scopes with name and ID addressing. Separate coverage rows require
+pagination, stable/prerelease metadata, nonempty descriptions and server count,
+both intent omission and explicit exact-metadata intent, all file shapes,
+both manifest shapes, same-size differences, absence behavior, history, and
+known inaccessible/deleted resources. Missing optional-at-this-site resources
+remain explicit incomplete closure gaps, not pass-shaped pytest skips.
+Manifest-shape credit requires that the successful operation referenced and
+fetched that manifest's root. Merely supplying an unused capture is not coverage.
+
+Each report row also has an enumerated `reason`; it never contains exception
+messages, request values, paths or identities:
+
+| Reason | Meaning |
+| --- | --- |
+| `ok`, `expected-error` | Successful result or exactly expected error outcome |
+| `not-run`, `coverage-gap` | A dependent step was not reached, or required coverage is missing |
+| `missing-fixture`, `budget-exhausted` | Missing required independent input, or an exhausted configured bound |
+| `request-boundary`, `filesystem-boundary` | A forbidden request or local mutation was blocked |
+| `baseline-mismatch` | Result, request binding, local control or readback differs from its independent expectation |
+| `gate-or-configuration` | An approval, privacy, input-shape or configuration check rejected execution |
+| `authentication-error`, `permission-error`, `not-found`, `service-error` | Unexpected typed service outcome; numeric HTTP status remains in the request trace |
+| `protocol-error`, `transport-error` | Malformed/undecodable response or failed transport |
+| `local-source-error`, `registration-unknown`, `unexpected-error` | Local source failure/change, ambiguous registration, or another unclassified failure |
+
+Startup failures also print only status counts and an enumerated reason. A
+reason is diagnostic, never a fallback that converts failure into success.
+
+The network guard checks actual transport requests including signed redirects.
+Only the case's approved API routes and independently derived manifest/node
+blobs are permitted. History cannot scan unrelated packages or feeds.
+Versionless limited metadata must use the approved versionless route with **no
+intent/query**; exact metadata intent must match the case. Only the read-only
+Dedup URL-resolution POST is allowed; PUT/PATCH/DELETE and payload resolution
+are blocked before transport. A synchronous filesystem audit blocks inspection
+writes/mkdir/deletes/etc.; comparisons also recheck source hashes and identity.
+Runner evidence writes happen outside that guard.
+
+HTTP content encoding is decoded once at the guard boundary; response and total
+byte budgets count **decoded** bytes. The reconstructed response removes the
+encoded representation's `Content-Encoding` and `Content-Length` and lets HTTPX
+describe the decoded body length. All other headers, including duplicate headers,
+continuations, asynchronous-operation indicators and content ranges, retain their
+semantics for the native client's existing checks.
+
+Only fixed operation names, method names, reason codes, numeric status/count/byte values and
+booleans are persisted to `report.json` and `requests.json`. No organization,
+feed, package, filenames, source paths, request/response bodies, auth headers,
+query strings, signed URLs, receipts or proofs are written to evidence or console.
+HTTP client logging is suppressed during runs. Do not enable external wire
+logging, traceback-local capture, or shell transcript capture of secrets.
+Input validation rejects credential/capability fields rather than retaining raw
+service captures. Tokens and opaque registration proofs remain process-local.
+
+### Separately approved registration-only experiment
+
+No read-only config, public fixture, or missing-version observation grants write
+approval. Preview the exact destination/version privately with the user first.
+A separate `"issue3-registration"` proposal uses the common organization,
+credential, services, limits and evidence fields above, plus:
+
+| Field | Requirement |
+| --- | --- |
+| `fixture_only`, `publisher` | `false`, `"registration-only"` |
+| `scope`, `project`, `project_id` | Explicit scope; project name/ID and canonical GUID for project scope only |
+| `feed`, `feed_id`, `name`, `version` | Exact authorized destination, canonical feed GUID, package name, **new disposable immutable exact version** |
+| `approved`, `disposable_version`, `preuploaded_references_verified` | All literal `true`, only after that exact proposal is approved |
+| `conflict_probe` | Literal `false` normally; `true` approves one additional exact conflict PUT |
+| `expected_metadata` | Exact `version`, uppercase `manifest_id`, uppercase `super_root_id`, `package_size`, `description` from approved pre-uploaded content |
+| `files` | Independent manifest inventory: `path`, uppercase `content_id`, and nonnegative `size` for every represented file |
+| `proof_nodes_env` | Name of an environment variable holding a JSON array of valid pre-uploaded serialized proof-node strings |
+| `proof_nodes_sha256` | SHA-256 of `json.dumps(proofs, separators=(",", ":"), ensure_ascii=True).encode("ascii")` |
+
+Proof content is **not** placed in proposal JSON. The runner checks its approved
+digest, serialized-node structure, super-root-to-manifest connection, and the
+complete content-tree proof down to the independently inventoried file roots.
+Supplying only the super-root is insufficient: all intermediate content-tree
+nodes must also be present. File-payload tree nodes are not required as proofs.
+Existing retention and service-valid pre-uploaded references remain explicit
+caller preconditions: do not invent IDs, proofs or retention capabilities.
+The proposal must not be marked `completed` or `executed`.
+
+Without `--execute-approved`, the registration script only emits a fixed preview
+summary and makes no requests. Execution additionally requires
+`AZ_ARTIFACTS_RUN_REGISTRATION_INTEROP=1`, `--execute-approved`, and
+`--proposal-sha256` matching the exact approved proposal file bytes. This binds
+the destination, version, references, conflict permission and budgets together.
+The digest check and JSON parser consume the same bounded byte buffer, so a
+concurrent proposal replacement cannot separate approval from execution.
+
+```powershell
+# Only after the user approves the exact private proposal:
+.\.venv\Scripts\python.exe tests\interop\issue3_registration.py `
+  --private-directory 'C:\private\issue3' `
+  --proposal 'C:\private\issue3\registration.json' `
+  --proposal-sha256 $approvedProposalSha256 --execute-approved
+```
+
+The equivalent separately gated pytest test is `test_live_registration_only`;
+set `AZ_ARTIFACTS_REGISTRATION_PROPOSAL` and
+`AZ_ARTIFACTS_REGISTRATION_PROPOSAL_SHA256` alongside the private-directory and
+registration opt-in environment variables.
+
+An exclusive attempt marker under the private root binds the canonical
+destination/version across output-directory changes, organization URL aliases,
+and equivalent GUID spellings. Do not delete it or move
+the proposal to another root to retry. There is exactly one public `add_package`
+PUT, followed by a read-only exact metadata check **only after acknowledged
+success**. An approved conflict probe permits one second PUT expecting a typed
+conflict and another unchanged readback. There are no uploads, automatic retries,
+delete/overwrite, republishing, or reconciliation-success fallbacks. An ambiguous
+response leaves the attempt reserved and the experiment failed; independently
+inspect the immutable version before deciding any further action.
 
 ## Installation
 
@@ -496,7 +810,10 @@ shared Feed resource area (by ID/name) or its known organization fallback. Trans
 metadata and registration use the separate `pkgs.dev.azure.com` service. No NuGet-only `isListed`
 or `isRelease` filters are sent for Universal Packages. These paths follow the
 [Feed REST API](https://learn.microsoft.com/en-us/rest/api/azure/devops/artifacts/feed-management/get-feeds?view=azure-devops-rest-7.1)
-and pinned SDK; **live catalog compatibility remains unverified**.
+and pinned SDK. Live package/version enumeration, forced package pagination and
+existence checks have been verified against independent REST baselines in both
+feed scopes using names and IDs. Full feed-list acceptance remains open where
+bounded independent enumeration could not complete.
 
 ## Read package metadata
 
@@ -546,7 +863,7 @@ The exported frozen `PackageVersionDeletionState(name, version, deleted_date=Non
 remains **data only**, with an optional timezone-aware UTC deletion timestamp;
 there is no deletion/restore API.
 
-### SDK capability mapping and experimental routing
+### SDK capability mapping and route verification
 
 The pinned [`v7_1.upack_packaging` SDK](https://github.com/microsoft/azure-devops-python-api/tree/86c9a559fc4ab309df21e674b236a542f9e77f89/azure-devops/azure/devops/v7_1/upack_packaging)
 contains three operations and five models. This checkout covers that narrow
@@ -578,10 +895,14 @@ that shared location and this library's existing exact-version route, the new
 versionless GET uses
 `/{project?}/_packaging/{feed}/upack/packages/{name}/versions`, without a final
 version segment. The registration PUT uses that same route **with** the exact
-version segment, as the metadata GET does. These are **inferred routes**, not
-live-discovered/verified location templates. No alternative endpoint is tried on
-failure. Live Azure DevOps compatibility, including collection completeness and
-registration success/conflict semantics, remains an explicit experimental gate.
+version segment, as the metadata GET does. These routes were derived from the
+pinned SDK location. Exact and versionless metadata GETs have now been verified
+against independent live REST responses in organization/project scopes with
+name/ID addressing, including descriptions and the server's collection count.
+No alternative endpoint is tried on failure. Public `add_package` acknowledgment,
+exact metadata readback, and immutable-version conflict behavior have also been
+exercised on a project-scoped feed. Organization-scoped registration remains
+outside that live coverage.
 
 ## Compare a local file before uploading
 
@@ -678,8 +999,11 @@ Traversed malformed/missing/corrupt metadata raises, never `match` or absence.
 `match` verifies represented content, not current payload availability or
 historical upload provenance. Catalog absence does not ensure publishability:
 deleted versions stay reserved and concurrent publishers can race.
-The algorithm follows the existing decoder and mock fixtures; **live Azure
-single-chunk and multi-level package interoperability remains unverified**.
+Live raw-chunk, empty-file, multi-chunk and multi-level file comparisons have been checked
+against independently hash-verified manifest/node metadata and approved local
+controls, without remote payload reads. On Windows, cross-API opening checks
+account for executable-extension mode hints in path stat that descriptor stat
+does not expose; full per-API mutation checks remain in place.
 Use [publishing](#publish-a-package) to upload a directory, or
 [registration](#register-already-uploaded-content) for pre-uploaded references.
 
@@ -803,9 +1127,10 @@ requests for **every selected version**, including those without the path. It
 never searches every feed/package, infers renames, detects content changes, or
 provides a snapshot across concurrent catalog changes. Files are not independently
 versioned: history associates the same relative path with package versions.
-Use explicit versions to bound the work. **Live inspection interoperability is
-unverified**, including service-produced raw/chunked manifests and inaccessible
-or deleted resources; fixture tests are not compatibility evidence.
+Use explicit versions to bound the work. Live inspection and bounded history
+cover raw and chunked manifests, with independently captured REST/node data and
+ArtifactTool file controls. Independently known inaccessible/deleted resources
+remain explicit live acceptance gaps; offline fixtures do not close those gaps.
 
 ## Register already-uploaded content
 
@@ -905,8 +1230,10 @@ checks cannot authorize reuse or avoid races. After an uncertain outcome, stop
 automatic processing and explicitly inspect the intended package's metadata
 before deciding how to reconcile. Do not turn a subsequent 409 into success or
 automatically delete/recreate a version. Neither a catalog miss nor one matching
-file proves a registration succeeded. The PUT route and live response behavior
-remain experimental; fixture success is not service interoperability evidence.
+file proves a registration succeeded. Project-scoped registration acknowledgment,
+exact readback, and a separately approved conflict followed by unchanged readback
+have been exercised live. This does not establish organization-scoped write
+compatibility or live coverage of every error outcome.
 
 ## Azure CLI comparison and unsupported behavior
 
@@ -1024,8 +1351,10 @@ coordinated with [issue #2](https://github.com/cataggar/az-artifacts/issues/2).
 Do not extend the read-only smoke above to upload, register, retry, or delete
 anything automatically. Verify the service location template and actual
 acknowledgment/conflict/error responses before claiming compatibility.
-No live registration or read-only smoke evidence is claimed here; the complete
-local implementation and fixture coverage do not remove these release gates.
+The separately gated harness covers project-scoped acknowledgment/conflict and
+read-only inspection against independent fixtures. Full feed enumeration and
+known inaccessible/deleted-resource cases remain open acceptance requirements;
+partial live coverage does not remove those release gates.
 
 ## Releasing the Python distribution to PyPI
 
