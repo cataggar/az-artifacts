@@ -36,9 +36,16 @@ def validate_proposal(proposal):
     validate_name(proposal["name"])
     support.require(version_pattern(proposal["version"]) is None)
     expected = proposal["expected_metadata"]
-    support.require(set(expected) == {
-        "version", "manifest_id", "super_root_id", "description", "package_size",
-    })
+    support.require(
+        set(expected)
+        == {
+            "version",
+            "manifest_id",
+            "super_root_id",
+            "description",
+            "package_size",
+        }
+    )
     support.require(expected["version"] == proposal["version"])
     support.require(type(expected["package_size"]) is int and expected["package_size"] >= 0)
     support.require(expected["description"] is None or isinstance(expected["description"], str))
@@ -82,8 +89,9 @@ def validate_proofs(proposal, proofs):
     support.require(root in nodes and len(nodes[root]) == 2)
     content, manifest_ref = nodes[root]
     support.require(manifest_ref[0] == manifest and content[0].endswith("02"))
-    support.require(sum(size for _, size in nodes[root]) ==
-                    proposal["expected_metadata"]["package_size"])
+    support.require(
+        sum(size for _, size in nodes[root]) == proposal["expected_metadata"]["package_size"]
+    )
     expected = Counter((file["content_id"], file["size"]) for file in proposal["files"])
     represented = Counter()
     remaining = proposal["limits"]["items"]
@@ -117,9 +125,17 @@ def run(root, proposal, output, proofs, *, transport=None):
     guard = support.GuardTransport(transport or httpx.HTTPTransport(retries=0), budget)
     project = [proposal["project"]] if proposal["scope"] == "project" else []
     expected = proposal["expected_metadata"]
-    url = support.route(proposal["services"]["packaging"], *project, "_packaging",
-                        proposal["feed"], "upack", "packages", proposal["name"],
-                        "versions", proposal["version"])
+    url = support.route(
+        proposal["services"]["packaging"],
+        *project,
+        "_packaging",
+        proposal["feed"],
+        "upack",
+        "packages",
+        proposal["name"],
+        "versions",
+        proposal["version"],
+    )
     guard.routes = {
         ("GET", support.route(proposal["organization"], "_apis", "ResourceAreas")): "discovery",
         ("GET", url): "metadata",
@@ -127,22 +143,31 @@ def run(root, proposal, output, proofs, *, transport=None):
     guard.registration_url = url
     guard.intent = "FetchMetadataOnly"
     guard.registration_body = {
-        "manifestId": expected["manifest_id"], "superRootId": expected["super_root_id"],
+        "manifestId": expected["manifest_id"],
+        "superRootId": expected["super_root_id"],
         "proofNodes": list(proofs),
         **({"description": expected["description"]} if expected["description"] is not None else {}),
     }
-    metadata = PackagePushMetadata(expected["manifest_id"], expected["super_root_id"],
-                                   proofs, expected["description"])
+    metadata = PackagePushMetadata(
+        expected["manifest_id"], expected["super_root_id"], proofs, expected["description"]
+    )
     options = {
-        "feed": proposal["feed"], "name": proposal["name"], "version": proposal["version"],
-        "scope": proposal["scope"], **({"project": project[0]} if project else {}),
+        "feed": proposal["feed"],
+        "name": proposal["name"],
+        "version": proposal["version"],
+        "scope": proposal["scope"],
+        **({"project": project[0]} if project else {}),
     }
     # Identity, not proposal/output filename: changing output must not replay a PUT.
     _, organization = _organization_url(proposal["organization"])
-    identity = [_organization_url(organization.lower())[0], proposal["scope"],
-                str(UUID(proposal["project_id"])) if project else "",
-                str(UUID(proposal["feed_id"])),
-                proposal["name"], proposal["version"]]
+    identity = [
+        _organization_url(organization.lower())[0],
+        proposal["scope"],
+        str(UUID(proposal["project_id"])) if project else "",
+        str(UUID(proposal["feed_id"])),
+        proposal["name"],
+        proposal["version"],
+    ]
     marker_name = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
     marker = root / f"registration-attempt-{marker_name}.json"
     # Credential validation precedes reserving an attempt, but no remote preflight
@@ -150,32 +175,52 @@ def run(root, proposal, output, proofs, *, transport=None):
     auth = support.credential(proposal)
     with marker.open("x", encoding="utf-8") as stream:
         json.dump({"state": "attempt-reserved-never-replay"}, stream)
-    reports = [{"id": "registration", "status": "incomplete", "reason": support.Reason.NOT_RUN},
-               {"id": "readback", "status": "incomplete", "reason": support.Reason.NOT_RUN}]
+    reports = [
+        {"id": "registration", "status": "incomplete", "reason": support.Reason.NOT_RUN},
+        {"id": "readback", "status": "incomplete", "reason": support.Reason.NOT_RUN},
+    ]
     if proposal["conflict_probe"]:
-        reports.extend([
-            {"id": "approved-conflict", "status": "incomplete", "reason": support.Reason.NOT_RUN},
-            {"id": "conflict-readback", "status": "incomplete", "reason": support.Reason.NOT_RUN},
-        ])
+        reports.extend(
+            [
+                {
+                    "id": "approved-conflict",
+                    "status": "incomplete",
+                    "reason": support.Reason.NOT_RUN,
+                },
+                {
+                    "id": "conflict-readback",
+                    "status": "incomplete",
+                    "reason": support.Reason.NOT_RUN,
+                },
+            ]
+        )
     current = 0
     try:
-        with support.quiet_http_logs(), UniversalPackageClient(
-            proposal["organization"], credential=auth, transport=guard,
-            retries=0, max_workers=1,
-        ) as client:
+        with (
+            support.quiet_http_logs(),
+            UniversalPackageClient(
+                proposal["organization"],
+                credential=auth,
+                transport=guard,
+                retries=0,
+                max_workers=1,
+            ) as client,
+        ):
             guard.case = "registration"
             guard.puts_remaining = 1
             with support.readonly_filesystem():
                 client.add_package(**options, metadata=metadata)
-            support.require(guard.puts == 1 and not guard.violated,
-                            reason=support.Reason.REQUEST_BOUNDARY)
+            support.require(
+                guard.puts == 1 and not guard.violated, reason=support.Reason.REQUEST_BOUNDARY
+            )
             reports[0].update(status="pass", reason=support.Reason.OK)
             current = 1
             guard.case = "readback"
             with support.readonly_filesystem():
                 actual = client.get_package_metadata(**options, intent="FetchMetadataOnly")
-            support.require(support.normalized(actual) == expected,
-                            reason=support.Reason.BASELINE_MISMATCH)
+            support.require(
+                support.normalized(actual) == expected, reason=support.Reason.BASELINE_MISMATCH
+            )
             reports[1].update(status="pass", reason=support.Reason.OK)
             if proposal["conflict_probe"]:
                 current = 2
@@ -187,15 +232,17 @@ def run(root, proposal, output, proofs, *, transport=None):
                 except ConflictError:
                     support.require(guard.puts == 2, reason=support.Reason.REQUEST_BOUNDARY)
                 else:
-                    raise support.BoundaryError("Conflict was not confirmed",
-                                                reason=support.Reason.BASELINE_MISMATCH)
+                    raise support.BoundaryError(
+                        "Conflict was not confirmed", reason=support.Reason.BASELINE_MISMATCH
+                    )
                 reports[2].update(status="pass", reason=support.Reason.EXPECTED_ERROR)
                 current = 3
                 guard.case = "conflict-readback"
                 with support.readonly_filesystem():
                     actual = client.get_package_metadata(**options, intent="FetchMetadataOnly")
-                support.require(support.normalized(actual) == expected,
-                                reason=support.Reason.BASELINE_MISMATCH)
+                support.require(
+                    support.normalized(actual) == expected, reason=support.Reason.BASELINE_MISMATCH
+                )
                 reports[3].update(status="pass", reason=support.Reason.OK)
     except support.Incomplete as error:
         reports[current].update(status="incomplete", reason=support.reason_code(error))
@@ -220,7 +267,9 @@ def main(argv=None):
         support.require(os.environ.get("AZ_ARTIFACTS_RUN_REGISTRATION_INTEROP") == "1")
         support.require(isinstance(args.proposal_sha256, str))
     proposal = support.load_config(
-        root, path, "issue3-registration",
+        root,
+        path,
+        "issue3-registration",
         expected_sha256=args.proposal_sha256 if args.execute_approved else None,
     )
     if not args.execute_approved:
@@ -238,9 +287,14 @@ def cli(argv=None):
     try:
         return main(argv)
     except Exception as error:
-        print(json.dumps({
-            "status_counts": {"incomplete": 1}, "reason": support.reason_code(error),
-        }))
+        print(
+            json.dumps(
+                {
+                    "status_counts": {"incomplete": 1},
+                    "reason": support.reason_code(error),
+                }
+            )
+        )
         return 1
 
 

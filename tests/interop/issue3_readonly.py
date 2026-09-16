@@ -17,16 +17,38 @@ else:
 
 
 FEATURES = (
-    "pagination", "stable", "prerelease", "raw-manifest", "chunked-manifest",
-    "empty-file", "single-chunk", "multichunk", "multilevel-node", "same-size-different",
-    "existing-version", "missing-version", "existing-path", "missing-path", "file-version-missing",
-    "compare-version-missing", "compare-path-missing", "history",
-    "intent-omitted", "intent-explicit", "limited-count-descriptions",
-    "inaccessible", "deleted",
+    "pagination",
+    "stable",
+    "prerelease",
+    "raw-manifest",
+    "chunked-manifest",
+    "empty-file",
+    "single-chunk",
+    "multichunk",
+    "multilevel-node",
+    "same-size-different",
+    "existing-version",
+    "missing-version",
+    "existing-path",
+    "missing-path",
+    "file-version-missing",
+    "compare-version-missing",
+    "compare-path-missing",
+    "history",
+    "intent-omitted",
+    "intent-explicit",
+    "limited-count-descriptions",
+    "inaccessible",
+    "deleted",
 )
 ERRORS = {
-    "AuthenticationError", "PermissionDeniedError", "NotFoundError",
-    "PackageNotFoundError", "ProtocolError", "IntegrityError", "TransportError",
+    "AuthenticationError",
+    "PermissionDeniedError",
+    "NotFoundError",
+    "PackageNotFoundError",
+    "ProtocolError",
+    "IntegrityError",
+    "TransportError",
 }
 ARGUMENTS = {
     "list_feeds": {"max_response_bytes"},
@@ -61,15 +83,26 @@ def expected_result(entry):
     support.require(modes == 1)
     if "expected_sha256" in entry:
         support.require(entry["request"]["method"] == "list_feeds")
-        support.require(isinstance(entry["expected_sha256"], str) and
-                        re.fullmatch(r"[0-9a-f]{64}", entry["expected_sha256"]) is not None)
+        support.require(
+            isinstance(entry["expected_sha256"], str)
+            and re.fullmatch(r"[0-9a-f]{64}", entry["expected_sha256"]) is not None
+        )
         support.require(type(entry.get("expected_count")) is int and entry["expected_count"] >= 0)
     if "error" in entry:
         support.require(entry["error"] in ERRORS)
-        support.require(entry.get("operation") in {
-            "discovery", "feeds", "packages", "versions", "metadata",
-            "limited-metadata", "resolver", "manifest-or-node",
-        })
+        support.require(
+            entry.get("operation")
+            in {
+                "discovery",
+                "feeds",
+                "packages",
+                "versions",
+                "metadata",
+                "limited-metadata",
+                "resolver",
+                "manifest-or-node",
+            }
+        )
 
 
 def hash_local(source, budget):
@@ -80,8 +113,9 @@ def hash_local(source, budget):
             budget.check()
             size += len(data)
             if size > budget.limits["total_bytes"]:
-                raise support.Incomplete("Local control exceeds byte budget",
-                                         reason=support.Reason.BUDGET)
+                raise support.Incomplete(
+                    "Local control exceeds byte budget", reason=support.Reason.BUDGET
+                )
             checksum.update(data)
     budget.check()
     return checksum.hexdigest()
@@ -144,8 +178,10 @@ def prepare_case(root, config, baseline, case, entry, guard):
         support.require(source.is_file())
         before = source.stat()
         checksum = hash_local(source, guard.budget)
-        support.require(before.st_size == control["size"] and checksum == control["sha256"],
-                        reason=support.Reason.BASELINE_MISMATCH)
+        support.require(
+            before.st_size == control["size"] and checksum == control["sha256"],
+            reason=support.Reason.BASELINE_MISMATCH,
+        )
         args["local_path"] = source
         control = (source, before, checksum, control)
     return target, options | args, oracles, control
@@ -153,28 +189,37 @@ def prepare_case(root, config, baseline, case, entry, guard):
 
 def observe(method, case, entry, actual, oracles, control, guard):
     features = set()
-    oracles = [oracle for oracle in oracles
-               if oracle.root in guard.metadata_roots & guard.fetched]
+    oracles = [oracle for oracle in oracles if oracle.root in guard.metadata_roots & guard.fetched]
     condition = entry.get("condition")
     if "error" in entry:
-        if condition == "inaccessible" and entry["operation"] != "discovery" and entry["error"] in (
-            "PermissionDeniedError", "AuthenticationError", "NotFoundError",
+        if (
+            condition == "inaccessible"
+            and entry["operation"] != "discovery"
+            and entry["error"]
+            in (
+                "PermissionDeniedError",
+                "AuthenticationError",
+                "NotFoundError",
+            )
         ):
             features.add("inaccessible")
         if condition == "deleted":
             features.add("deleted")
         return features
     if method == "list_packages":
-        support.require(len(set(guard.page_offsets)) >= 2 and len(actual) >= 2,
-                        reason=support.Reason.REQUEST_BOUNDARY)
+        support.require(
+            len(set(guard.page_offsets)) >= 2 and len(actual) >= 2,
+            reason=support.Reason.REQUEST_BOUNDARY,
+        )
         features.add("pagination")
     if method == "list_package_versions":
         if any("-" not in value["version"] for value in actual):
             features.add("stable")
         if any("-" in value["version"] for value in actual):
             features.add("prerelease")
-        if (case["args"].get("include_deleted") is True
-                and any(value["is_deleted"] is True for value in actual)):
+        if case["args"].get("include_deleted") is True and any(
+            value["is_deleted"] is True for value in actual
+        ):
             features.add("deleted")
     if method == "package_version_exists":
         features.add("existing-version" if actual else "missing-version")
@@ -190,15 +235,23 @@ def observe(method, case, entry, actual, oracles, control, guard):
     if method == "get_package_versions_metadata":
         support.require(type(actual["count"]) is int)
         # A baseline omitting descriptions is insufficient evidence of preservation.
-        if (actual["value"] and all("description" in value for value in actual["value"])
-                and any(value["description"] for value in actual["value"])):
+        if (
+            actual["value"]
+            and all("description" in value for value in actual["value"])
+            and any(value["description"] for value in actual["value"])
+        ):
             features.add("limited-count-descriptions")
     if method == "list_file_versions" and actual:
         features.add("history")
     if method == "list_files":
         if "file_filter" not in case["args"]:
-            inventories = [[{key: value for key, value in file.items() if key != "feature"}
-                            for file in oracle.files] for oracle in oracles]
+            inventories = [
+                [
+                    {key: value for key, value in file.items() if key != "feature"}
+                    for file in oracle.files
+                ]
+                for oracle in oracles
+            ]
             support.require(actual in inventories, reason=support.Reason.BASELINE_MISMATCH)
         for oracle in oracles:
             features |= oracle.features
@@ -209,8 +262,9 @@ def observe(method, case, entry, actual, oracles, control, guard):
                 for file in oracle.files:
                     if file["path"] == case["args"]["relative_path"]:
                         support.require(
-                            {key: value for key, value in file.items() if key != "feature"} ==
-                            actual["file"], reason=support.Reason.BASELINE_MISMATCH,
+                            {key: value for key, value in file.items() if key != "feature"}
+                            == actual["file"],
+                            reason=support.Reason.BASELINE_MISMATCH,
                         )
                         features.add(file["feature"])
                         features |= oracle.features
@@ -236,26 +290,36 @@ def execute_case(client, method, args, entry, guard):
         except Exception as caught:
             error = caught
     if guard.violated:
-        raise support.BoundaryError("Request boundary violated",
-                                    reason=support.Reason.REQUEST_BOUNDARY)
+        raise support.BoundaryError(
+            "Request boundary violated", reason=support.Reason.REQUEST_BOUNDARY
+        )
     if isinstance(error, (support.Incomplete, support.BoundaryError)):
         raise error
     if error is not None:
-        if (type(error).__name__ != entry.get("error")
-                or getattr(error, "status_code", None) != entry.get("status_code")
-                or not guard.records or guard.records[-1]["case"] != guard.case
-                or guard.records[-1]["operation"] != entry.get("operation")):
-            raise support.BoundaryError("Unexpected service outcome",
-                                        reason=support.reason_code(error)) from None
+        if (
+            type(error).__name__ != entry.get("error")
+            or getattr(error, "status_code", None) != entry.get("status_code")
+            or not guard.records
+            or guard.records[-1]["case"] != guard.case
+            or guard.records[-1]["operation"] != entry.get("operation")
+        ):
+            raise support.BoundaryError(
+                "Unexpected service outcome", reason=support.reason_code(error)
+            ) from None
     elif "expected_sha256" in entry:
-        support.require(isinstance(actual, list) and len(actual) == entry["expected_count"],
-                        reason=support.Reason.BASELINE_MISMATCH)
+        support.require(
+            isinstance(actual, list) and len(actual) == entry["expected_count"],
+            reason=support.Reason.BASELINE_MISMATCH,
+        )
         canonical = json.dumps(actual, separators=(",", ":"), ensure_ascii=True, sort_keys=True)
-        support.require(hashlib.sha256(canonical.encode("ascii")).hexdigest() ==
-                        entry["expected_sha256"], reason=support.Reason.BASELINE_MISMATCH)
+        support.require(
+            hashlib.sha256(canonical.encode("ascii")).hexdigest() == entry["expected_sha256"],
+            reason=support.Reason.BASELINE_MISMATCH,
+        )
     elif "error" in entry or actual != entry["expected"]:
-        raise support.BoundaryError("Independent baseline mismatch",
-                                    reason=support.Reason.BASELINE_MISMATCH)
+        raise support.BoundaryError(
+            "Independent baseline mismatch", reason=support.Reason.BASELINE_MISMATCH
+        )
     return actual
 
 
@@ -268,10 +332,17 @@ def run(root, config, baseline, output, *, transport=None):
     support.require(isinstance(cases, list))
     if len(cases) > limits["cases"]:
         raise support.Incomplete("Case budget exhausted", reason=support.Reason.BUDGET)
-    with support.quiet_http_logs(), UniversalPackageClient(
-        config["organization"], credential=support.credential(config), retries=0,
-        max_workers=1, max_manifest_bytes=limits["manifest_bytes"], transport=guard,
-    ) as client:
+    with (
+        support.quiet_http_logs(),
+        UniversalPackageClient(
+            config["organization"],
+            credential=support.credential(config),
+            retries=0,
+            max_workers=1,
+            max_manifest_bytes=limits["manifest_bytes"],
+            transport=guard,
+        ) as client,
+    ):
         for index, case in enumerate(cases):
             case_id = f"case-{index + 1:04d}"
             guard.case = case_id
@@ -293,17 +364,20 @@ def run(root, config, baseline, output, *, transport=None):
                     source, before, checksum, _ = control
                     after = source.stat()
                     unchanged = hash_local(source, guard.budget) == checksum
-                    support.require(unchanged and (before.st_size, before.st_mtime_ns,
-                                                  before.st_ino) ==
-                                    (after.st_size, after.st_mtime_ns, after.st_ino),
-                                    reason=support.Reason.LOCAL_SOURCE)
+                    support.require(
+                        unchanged
+                        and (before.st_size, before.st_mtime_ns, before.st_ino)
+                        == (after.st_size, after.st_mtime_ns, after.st_ino),
+                        reason=support.Reason.LOCAL_SOURCE,
+                    )
                 gained = observe(case["method"], case, entry, actual, oracles, control, guard)
                 # An expected denial is not evidence that the successful API works.
                 if "error" not in entry:
                     covered.add((case["method"], target["scope"], case["addressing"]))
                 covered |= gained
                 record.update(
-                    status="pass", requests=len(guard.records) - start,
+                    status="pass",
+                    requests=len(guard.records) - start,
                     reason=support.Reason.EXPECTED_ERROR if "error" in entry else support.Reason.OK,
                 )
             except (support.Incomplete, FileNotFoundError, KeyError) as error:
@@ -314,19 +388,34 @@ def run(root, config, baseline, output, *, transport=None):
     for index, method in enumerate(support.METHODS):
         for scope in ("organization", "project"):
             for addressing in ("name", "id"):
-                reports.append({
-                    "id": f"matrix-{index + 1:02d}-{scope}-{addressing}",
-                    "status": "pass" if (method, scope, addressing) in covered else "incomplete",
-                    "reason": (support.Reason.OK if (method, scope, addressing) in covered
-                               else support.Reason.COVERAGE_GAP),
-                })
+                reports.append(
+                    {
+                        "id": f"matrix-{index + 1:02d}-{scope}-{addressing}",
+                        "status": "pass"
+                        if (method, scope, addressing) in covered
+                        else "incomplete",
+                        "reason": (
+                            support.Reason.OK
+                            if (method, scope, addressing) in covered
+                            else support.Reason.COVERAGE_GAP
+                        ),
+                    }
+                )
     for feature in FEATURES:
-        reports.append({"id": f"coverage-{feature}",
-                        "status": "pass" if feature in covered else "incomplete",
-                        "reason": support.Reason.OK if feature in covered
-                        else support.Reason.COVERAGE_GAP})
-    report = {"schema": 1, "cases": reports, "requests": budget.requests,
-              "items": budget.items, "bytes": budget.bytes}
+        reports.append(
+            {
+                "id": f"coverage-{feature}",
+                "status": "pass" if feature in covered else "incomplete",
+                "reason": support.Reason.OK if feature in covered else support.Reason.COVERAGE_GAP,
+            }
+        )
+    report = {
+        "schema": 1,
+        "cases": reports,
+        "requests": budget.requests,
+        "items": budget.items,
+        "bytes": budget.bytes,
+    }
     support.write_report(output, report, guard)
     return 0 if all(row["status"] == "pass" for row in reports) else 1
 
@@ -337,8 +426,9 @@ def main(argv=None):
     parser.add_argument("--config", required=True)
     parser.add_argument("--execute-readonly", action="store_true")
     args = parser.parse_args(argv)
-    support.require(args.execute_readonly
-                    and os.environ.get("AZ_ARTIFACTS_RUN_READONLY_INTEROP") == "1")
+    support.require(
+        args.execute_readonly and os.environ.get("AZ_ARTIFACTS_RUN_READONLY_INTEROP") == "1"
+    )
     root = support.private_root(args.private_directory)
     config = support.load_config(root, args.config, "issue3-readonly")
     baseline = baseline_from(root, config)
@@ -352,9 +442,14 @@ def cli(argv=None):
     try:
         return main(argv)
     except Exception as error:
-        print(json.dumps({
-            "status_counts": {"incomplete": 1}, "reason": support.reason_code(error),
-        }))
+        print(
+            json.dumps(
+                {
+                    "status_counts": {"incomplete": 1},
+                    "reason": support.reason_code(error),
+                }
+            )
+        )
         return 1
 
 

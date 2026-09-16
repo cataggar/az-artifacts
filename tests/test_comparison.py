@@ -80,15 +80,26 @@ def test_executable_filename_stat_hints_do_not_look_like_source_changes(
 
 
 def test_open_fingerprint_masks_only_windows_execute_hints(monkeypatch):
-    values = {"st_dev": 1, "st_ino": 2, "st_mode": stat.S_IFREG | 0o666, "st_size": 4,
-              "st_mtime_ns": 5, "st_ctime_ns": 6}
+    values = {
+        "st_dev": 1,
+        "st_ino": 2,
+        "st_mode": stat.S_IFREG | 0o666,
+        "st_size": 4,
+        "st_mtime_ns": 5,
+        "st_ctime_ns": 6,
+    }
     before = SimpleNamespace(**values)
     hinted = SimpleNamespace(**{**values, "st_mode": values["st_mode"] | 0o111})
     with monkeypatch.context() as patch:
         patch.setattr(_inspection.os, "name", "nt")
         assert _inspection._open_fingerprint(before) == _inspection._open_fingerprint(hinted)
-        for field, value in (("st_ino", 3), ("st_mode", stat.S_IFDIR | 0o666),
-                             ("st_mode", stat.S_IFREG | 0o444), ("st_size", 7), ("st_mtime_ns", 8)):
+        for field, value in (
+            ("st_ino", 3),
+            ("st_mode", stat.S_IFDIR | 0o666),
+            ("st_mode", stat.S_IFREG | 0o444),
+            ("st_size", 7),
+            ("st_mtime_ns", 8),
+        ):
             changed = SimpleNamespace(**{**values, field: value})
             assert _inspection._open_fingerprint(before) != _inspection._open_fingerprint(changed)
         with pytest.raises(LocalFileChangedError):

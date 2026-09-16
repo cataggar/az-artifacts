@@ -134,8 +134,13 @@ def private_path(root, value, *, exists=True):
     path = Path(value)
     path = (path if path.is_absolute() else root / path).resolve(strict=exists)
     require(path != root and path.is_relative_to(root))
-    require(not any((parent / ".git").exists()
-                    for parent in (path, *path.parents) if parent.is_relative_to(root)))
+    require(
+        not any(
+            (parent / ".git").exists()
+            for parent in (path, *path.parents)
+            if parent.is_relative_to(root)
+        )
+    )
     return path
 
 
@@ -144,12 +149,29 @@ def clean_input(value):
     if isinstance(value, dict):
         for key, child in value.items():
             require(isinstance(key, str))
-            require(key.lower() not in {
-                "token", "password", "authorization", "headers", "receipts",
-                "signature", "proofnodes", "proof_nodes", "signed_url",
-                "credential", "credentials", "pat", "access_token", "accesstoken",
-                "bearer_token", "client_secret", "secret", "capabilities",
-            })
+            require(
+                key.lower()
+                not in {
+                    "token",
+                    "password",
+                    "authorization",
+                    "headers",
+                    "receipts",
+                    "signature",
+                    "proofnodes",
+                    "proof_nodes",
+                    "signed_url",
+                    "credential",
+                    "credentials",
+                    "pat",
+                    "access_token",
+                    "accesstoken",
+                    "bearer_token",
+                    "client_secret",
+                    "secret",
+                    "capabilities",
+                }
+            )
             clean_input(child)
     elif isinstance(value, list):
         for child in value:
@@ -210,9 +232,13 @@ def normalized(value):
 def limits_from(config):
     limits = config["limits"]
     maxima = {
-        "requests": 10000, "items": 250000, "seconds": 3600,
-        "response_bytes": 64 * 1024 * 1024, "total_bytes": 256 * 1024 * 1024,
-        "manifest_bytes": 64 * 1024 * 1024, "cases": 1000,
+        "requests": 10000,
+        "items": 250000,
+        "seconds": 3600,
+        "response_bytes": 64 * 1024 * 1024,
+        "total_bytes": 256 * 1024 * 1024,
+        "manifest_bytes": 64 * 1024 * 1024,
+        "cases": 1000,
     }
     require(set(limits) == set(maxima))
     for key, maximum in maxima.items():
@@ -273,10 +299,12 @@ def node_children(data):
         width = 7 if node else 3
         end = offset + 1 + width + 32
         require(end <= len(data))
-        children.append((
-            data[offset + 1 + width:end].hex().upper() + ("02" if node else "01"),
-            int.from_bytes(data[offset + 1:offset + 1 + width], "little"),
-        ))
+        children.append(
+            (
+                data[offset + 1 + width : end].hex().upper() + ("02" if node else "01"),
+                int.from_bytes(data[offset + 1 : offset + 1 + width], "little"),
+            )
+        )
         offset = end
     require(offset == len(data))
     return children
@@ -313,16 +341,24 @@ class ManifestOracle:
             path = item["path"]
             require(isinstance(path, str))
             path = path.removeprefix("/")
-            require(path and "\\" not in path and all(p not in ("", ".", "..")
-                                                     for p in path.split("/")))
+            require(
+                path and "\\" not in path and all(p not in ("", ".", "..") for p in path.split("/"))
+            )
             leaves, depth = self._tree(identifier, size, budget, set())
-            feature = ("empty-file" if size == 0 else
-                       "single-chunk" if identifier.endswith("01") else
-                       "multilevel-node" if depth > 1 else "multichunk")
+            feature = (
+                "empty-file"
+                if size == 0
+                else "single-chunk"
+                if identifier.endswith("01")
+                else "multilevel-node"
+                if depth > 1
+                else "multichunk"
+            )
             if identifier.endswith("02") and leaves < 2:
                 raise Incomplete("Required tree fixture is not multichunk")
-            self.files.append({"path": path, "size": size, "content_id": identifier,
-                               "feature": feature})
+            self.files.append(
+                {"path": path, "size": size, "content_id": identifier, "feature": feature}
+            )
         require(len({file["path"] for file in self.files}) == len(self.files))
         # Superfluous blobs may conceal payload captures; do not accept them.
         require(set(self.blobs) <= self.allowed | self.file_nodes)
@@ -361,8 +397,10 @@ class ManifestOracle:
         self.file_nodes.add(identifier)
         children = node_children(self._data(identifier))
         require(sum(length for _, length in children) == size)
-        results = [self._tree(child, length, budget, ancestors | {identifier})
-                   for child, length in children]
+        results = [
+            self._tree(child, length, budget, ancestors | {identifier})
+            for child, length in children
+        ]
         return sum(count for count, _ in results), 1 + max(depth for _, depth in results)
 
 
@@ -376,17 +414,28 @@ def _audit(event, args):
     if event == "open":
         _, mode, flags = args
         write = (isinstance(mode, str) and any(flag in mode for flag in "wax+")) or (
-            isinstance(flags, int) and flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT |
-                                               os.O_TRUNC | os.O_APPEND)
+            isinstance(flags, int)
+            and flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND)
         )
         if write:
             state["violation"] = True
-            raise BoundaryError("Inspection filesystem write blocked",
-                                reason=Reason.FILESYSTEM_BOUNDARY)
+            raise BoundaryError(
+                "Inspection filesystem write blocked", reason=Reason.FILESYSTEM_BOUNDARY
+            )
     elif event in {
-        "os.mkdir", "os.remove", "os.rename", "os.rmdir", "os.link", "os.symlink",
-        "os.truncate", "os.chmod", "os.chown", "os.utime", "shutil.copyfile",
-        "subprocess.Popen", "os.system",
+        "os.mkdir",
+        "os.remove",
+        "os.rename",
+        "os.rmdir",
+        "os.link",
+        "os.symlink",
+        "os.truncate",
+        "os.chmod",
+        "os.chown",
+        "os.utime",
+        "shutil.copyfile",
+        "subprocess.Popen",
+        "os.system",
     }:
         state["violation"] = True
         raise BoundaryError("Inspection mutation blocked", reason=Reason.FILESYSTEM_BOUNDARY)
@@ -414,8 +463,11 @@ def readonly_filesystem():
 def quiet_http_logs():
     # HTTPX's normal INFO request line includes signed URLs. Never let a caller's
     # verbose logging turn metadata-only evidence into an accidental capability log.
-    loggers = [logging.getLogger(name) for name in logging.Logger.manager.loggerDict
-               if name == "httpx" or name.startswith(("httpx.", "httpcore"))]
+    loggers = [
+        logging.getLogger(name)
+        for name in logging.Logger.manager.loggerDict
+        if name == "httpx" or name.startswith(("httpx.", "httpcore"))
+    ]
     previous = [(logger, logger.disabled) for logger in loggers]
     for logger in loggers:
         logger.disabled = True
@@ -464,26 +516,33 @@ class GuardTransport(httpx.BaseTransport):
                 self.deny()
             operation = "manifest-or-node"
         elif method == "PUT":
-            if (url != self.registration_url or self.puts_remaining != 1
-                    or json.loads(request.content) != self.registration_body):
+            if (
+                url != self.registration_url
+                or self.puts_remaining != 1
+                or json.loads(request.content) != self.registration_body
+            ):
                 self.deny()
             self.puts_remaining = 0
             self.puts += 1
             operation = "registration"
         elif operation == "resolver":
             identifiers = json.loads(request.content)
-            if (not isinstance(identifiers, list) or not identifiers
-                    or not all(isinstance(i, str) and i.upper() in self.allowed
-                               for i in identifiers)):
+            if (
+                not isinstance(identifiers, list)
+                or not identifiers
+                or not all(isinstance(i, str) and i.upper() in self.allowed for i in identifiers)
+            ):
                 self.deny()
         elif operation is None or method != "GET":
             self.deny()
         if operation == "packages":
             query = request.url.params
-            if (query.get("isRelease") is not None
-                    or query.get("packageNameQuery") != self.name_query
-                    or query.get("protocolType") != "upack"
-                    or (self.page_size is not None and query.get("$top") != str(self.page_size))):
+            if (
+                query.get("isRelease") is not None
+                or query.get("packageNameQuery") != self.name_query
+                or query.get("protocolType") != "upack"
+                or (self.page_size is not None and query.get("$top") != str(self.page_size))
+            ):
                 self.deny()
             self.page_offsets.append(int(query.get("$skip", "0")))
         if operation == "limited-metadata" and request.url.query:
@@ -533,8 +592,13 @@ class GuardTransport(httpx.BaseTransport):
                         self.deny()
                     require(isinstance(location, str), reason=Reason.PROTOCOL)
                     self.urls[str(httpx.URL(location))] = identifier.upper()
-            if (operation == "manifest-or-node"
-                    and response.status_code in (301, 302, 303, 307, 308)):
+            if operation == "manifest-or-node" and response.status_code in (
+                301,
+                302,
+                303,
+                307,
+                308,
+            ):
                 location = response.headers.get("location")
                 require(bool(location), reason=Reason.PROTOCOL)
                 self.urls[str(httpx.URL(urljoin(url, location)))] = self.urls[url]
@@ -549,10 +613,14 @@ class GuardTransport(httpx.BaseTransport):
                         record["count"] = body["count"]
             # iter_bytes() already decoded Content-Encoding. Preserve every other
             # header (including duplicates); HTTPX supplies the decoded length.
-            headers = [(key, value) for key, value in response.headers.raw
-                       if key.lower() not in (b"content-encoding", b"content-length")]
-            return httpx.Response(response.status_code, headers=headers,
-                                  content=bytes(data), request=request)
+            headers = [
+                (key, value)
+                for key, value in response.headers.raw
+                if key.lower() not in (b"content-encoding", b"content-length")
+            ]
+            return httpx.Response(
+                response.status_code, headers=headers, content=bytes(data), request=request
+            )
         finally:
             response.close()
 
@@ -581,17 +649,31 @@ def configure_routes(guard, config, target, addressing, case):
     }
     if case["method"] == "list_feeds":
         guard.routes["GET", catalog] = "feeds"
-    if case["method"] in ("list_packages", "list_package_versions", "package_version_exists",
-                          "file_exists", "compare_file"):
+    if case["method"] in (
+        "list_packages",
+        "list_package_versions",
+        "package_version_exists",
+        "file_exists",
+        "compare_file",
+    ):
         guard.routes["GET", route(catalog, feed, "packages")] = "packages"
         names = [args["name"]] if "name" in args else []
-        for package_id in (target["package_ids"][name] for name in names
-                           if name in target["package_ids"]):
+        for package_id in (
+            target["package_ids"][name] for name in names if name in target["package_ids"]
+        ):
             versions_url = route(catalog, feed, "packages", package_id, "versions")
             guard.routes["GET", versions_url] = "versions"
     if "name" in args and case["method"] not in ("list_package_versions", "package_version_exists"):
-        metadata = route(services["packaging"], *project, "_packaging", feed,
-                         "upack", "packages", args["name"], "versions")
+        metadata = route(
+            services["packaging"],
+            *project,
+            "_packaging",
+            feed,
+            "upack",
+            "packages",
+            args["name"],
+            "versions",
+        )
         if case["method"] == "get_package_versions_metadata":
             guard.routes["GET", metadata] = "limited-metadata"
         versions = args.get("versions", [args["version"]] if "version" in args else [])
@@ -607,8 +689,7 @@ def configure_routes(guard, config, target, addressing, case):
     guard.intent = args.get("intent")
     guard.name_query = args.get("name_query", args.get("name"))
     guard.page_size = args.get("page_size")
-    return {"scope": target["scope"], "feed": feed,
-            **({"project": project[0]} if project else {})}
+    return {"scope": target["scope"], "feed": feed, **({"project": project[0]} if project else {})}
 
 
 def write_report(output, report, guard):

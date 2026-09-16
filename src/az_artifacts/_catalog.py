@@ -17,7 +17,10 @@ def _values(
     max_bytes: int = 16 * 1024 * 1024,
 ) -> list[object]:
     response = http.request(
-        "GET", url, params=params, headers={"Accept": "application/json; api-version=7.1"},
+        "GET",
+        url,
+        params=params,
+        headers={"Accept": "application/json; api-version=7.1"},
         max_bytes=max_bytes,
     )
     if (
@@ -42,17 +45,13 @@ def _feeds_url(base: str, project: str | None) -> str:
     return endpoint(base, *segments, "_apis", "packaging", "Feeds")
 
 
-def list_feeds(
-    http: Http, base: str, project: str | None, *, max_bytes: int
-) -> tuple[Feed, ...]:
+def list_feeds(http: Http, base: str, project: str | None, *, max_bytes: int) -> tuple[Feed, ...]:
     # This endpoint has no documented paging parameters.
     # URL resolution and deleted upstreams are not part of the public Feed model.
     params = {"api-version": "7.1", "includeUrls": "false", "includeDeletedUpstreams": "false"}
     return tuple(
         _json.feed(entry)
-        for entry in _values(
-            http, _feeds_url(base, project), params, "Feeds", max_bytes=max_bytes
-        )
+        for entry in _values(http, _feeds_url(base, project), params, "Feeds", max_bytes=max_bytes)
     )
 
 

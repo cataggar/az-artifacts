@@ -827,10 +827,9 @@ shared Feed resource area (by ID/name) or its known organization fallback. Trans
 metadata and registration use the separate `pkgs.dev.azure.com` service. No NuGet-only `isListed`
 or `isRelease` filters are sent for Universal Packages. These paths follow the
 [Feed REST API](https://learn.microsoft.com/en-us/rest/api/azure/devops/artifacts/feed-management/get-feeds?view=azure-devops-rest-7.1)
-and pinned SDK. Live package/version enumeration, forced package pagination and
+and pinned SDK. Live feed/package/version enumeration, forced package pagination and
 existence checks have been verified against independent REST baselines in both
-feed scopes using names and IDs. Full feed-list acceptance remains open where
-bounded independent enumeration could not complete.
+feed scopes using names and IDs, including complete bounded feed responses.
 
 ## Read package metadata
 
@@ -1147,7 +1146,8 @@ versioned: history associates the same relative path with package versions.
 Use explicit versions to bound the work. Live inspection and bounded history
 cover raw and chunked manifests, with independently captured REST/node data and
 ArtifactTool file controls. Independently known inaccessible/deleted resources
-remain explicit live acceptance gaps; offline fixtures do not close those gaps.
+exercise access-error propagation and deletion semantics without confusing
+arbitrary missing-resource responses with known permission failures.
 
 ## Register already-uploaded content
 
@@ -1369,9 +1369,9 @@ Do not extend the read-only smoke above to upload, register, retry, or delete
 anything automatically. Verify the service location template and actual
 acknowledgment/conflict/error responses before claiming compatibility.
 The separately gated harness covers project-scoped acknowledgment/conflict and
-read-only inspection against independent fixtures. Full feed enumeration and
-known inaccessible/deleted-resource cases remain open acceptance requirements;
-partial live coverage does not remove those release gates.
+read-only discovery and inspection against independent fixtures, including full
+feed enumeration and known inaccessible/deleted-resource cases. Previous
+successful runs do not authorize another write or make substituted fixtures valid.
 
 ## Releasing the Python distribution to PyPI
 

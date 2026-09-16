@@ -12,9 +12,13 @@ else:
 
 
 LIMITS = {
-    "requests": 2000, "items": 10000, "seconds": 600,
-    "response_bytes": 4 * 1024 * 1024, "total_bytes": 64 * 1024 * 1024,
-    "manifest_bytes": 4 * 1024 * 1024, "cases": 200,
+    "requests": 2000,
+    "items": 10000,
+    "seconds": 600,
+    "response_bytes": 4 * 1024 * 1024,
+    "total_bytes": 64 * 1024 * 1024,
+    "manifest_bytes": 4 * 1024 * 1024,
+    "cases": 200,
 }
 FEED_ID = "22222222-2222-4222-8222-222222222222"
 PROJECT_FEED_ID = "55555555-5555-4555-8555-555555555555"
@@ -44,16 +48,26 @@ def example():
         blobs[identifier] = base64.b64encode(data).decode("ascii")
         return identifier, sum(size for _, size in children)
 
-    sources = {"empty.bin": b"", "single.bin": b"abc", "multi.bin": b"abcdef",
-               "tree.bin": b"abcdefghi", "different.bin": b"xyz"}
+    sources = {
+        "empty.bin": b"",
+        "single.bin": b"abc",
+        "multi.bin": b"abcdef",
+        "tree.bin": b"abcdefghi",
+        "different.bin": b"xyz",
+    }
     first, second, third = chunk(b"abc"), chunk(b"def"), chunk(b"ghi")
     multi = node([first, second])
     tree = node([multi, third])
     files = {"empty.bin": chunk(b""), "single.bin": first, "multi.bin": multi, "tree.bin": tree}
-    manifest = json.dumps({"items": [
-        {"path": "/" + path, "blob": {"id": identifier, "size": size}}
-        for path, (identifier, size) in files.items()
-    ]}, separators=(",", ":")).encode()
+    manifest = json.dumps(
+        {
+            "items": [
+                {"path": "/" + path, "blob": {"id": identifier, "size": size}}
+                for path, (identifier, size) in files.items()
+            ]
+        },
+        separators=(",", ":"),
+    ).encode()
     raw = chunk(manifest, keep=True)
     halfway = len(manifest) // 2
     chunked = node([chunk(manifest[:halfway], keep=True), chunk(manifest[halfway:], keep=True)])
@@ -65,49 +79,86 @@ def example():
         {"manifest_id": raw[0], "blobs": {**file_nodes, raw[0]: blobs[raw[0]]}},
         {"manifest_id": chunked[0], "blobs": {**file_nodes, **manifest_nodes}},
     ]
-    inventory = [{"path": path, "size": size, "content_id": identifier}
-                 for path, (identifier, size) in files.items()]
+    inventory = [
+        {"path": path, "size": size, "content_id": identifier}
+        for path, (identifier, size) in files.items()
+    ]
     versions = ["1.0.0", "1.1.0-preview.1"]
     metadatas = {
-        version: {"version": version, "manifest_id": manifests[index]["manifest_id"],
-                  "super_root_id": "AB" * 32 + "02", "package_size": len(manifest) + 18,
-                  "description": "Synthetic stable" if index == 0 else "Synthetic prerelease"}
+        version: {
+            "version": version,
+            "manifest_id": manifests[index]["manifest_id"],
+            "super_root_id": "AB" * 32 + "02",
+            "package_size": len(manifest) + 18,
+            "description": "Synthetic stable" if index == 0 else "Synthetic prerelease",
+        }
         for index, version in enumerate(versions)
     }
-    version_values = [{
-        "version": version, "id": None, "normalized_version": version, "is_deleted": False,
-        "is_latest": index == 1, "publish_date": "2000-01-01T00:00:00+00:00",
-        "deleted_date": None, "description": metadatas[version]["description"],
-        "package_description": "",
-    } for index, version in enumerate(versions)]
-    package_values = [{
-        "id": identifier, "name": name, "normalized_name": name,
-        "protocol_type": "upack", "versions": None,
-    } for identifier, name in ((PACKAGE_ID, "fixture-package"), (OTHER_ID, "fixture-package-two"))]
+    version_values = [
+        {
+            "version": version,
+            "id": None,
+            "normalized_version": version,
+            "is_deleted": False,
+            "is_latest": index == 1,
+            "publish_date": "2000-01-01T00:00:00+00:00",
+            "deleted_date": None,
+            "description": metadatas[version]["description"],
+            "package_description": "",
+        }
+        for index, version in enumerate(versions)
+    ]
+    package_values = [
+        {
+            "id": identifier,
+            "name": name,
+            "normalized_name": name,
+            "protocol_type": "upack",
+            "versions": None,
+        }
+        for identifier, name in ((PACKAGE_ID, "fixture-package"), (OTHER_ID, "fixture-package-two"))
+    ]
     config = {
-        "schema": 1, "kind": "issue3-readonly", "fixture_only": True,
+        "schema": 1,
+        "kind": "issue3-readonly",
+        "fixture_only": True,
         "organization": "https://dev.azure.com/fixtureorg",
-        "credential_env": "AZ_ARTIFACTS_REFERENCE_TOKEN", "credential_kind": "bearer",
-        "services": {"feeds": "https://feeds.dev.azure.com/fixtureorg",
-                     "packaging": "https://pkgs.dev.azure.com/fixtureorg",
-                     "dedup": "https://vsblob.dev.azure.com/fixtureorg"},
-        "baseline_file": "baseline.json", "evidence_directory": "readonly-evidence",
+        "credential_env": "AZ_ARTIFACTS_REFERENCE_TOKEN",
+        "credential_kind": "bearer",
+        "services": {
+            "feeds": "https://feeds.dev.azure.com/fixtureorg",
+            "packaging": "https://pkgs.dev.azure.com/fixtureorg",
+            "dedup": "https://vsblob.dev.azure.com/fixtureorg",
+        },
+        "baseline_file": "baseline.json",
+        "evidence_directory": "readonly-evidence",
         "limits": dict(LIMITS),
         "targets": [
-            {"scope": "organization", "feed": {"name": "fixture-feed", "id": FEED_ID},
-             "package_ids": {"fixture-package": PACKAGE_ID}},
-            {"scope": "project", "feed": {"name": "fixture-project-feed", "id": PROJECT_FEED_ID},
-             "project": {"name": "fixture-project", "id": PROJECT_ID},
-             "package_ids": {"fixture-package": PACKAGE_ID}},
+            {
+                "scope": "organization",
+                "feed": {"name": "fixture-feed", "id": FEED_ID},
+                "package_ids": {"fixture-package": PACKAGE_ID},
+            },
+            {
+                "scope": "project",
+                "feed": {"name": "fixture-project-feed", "id": PROJECT_FEED_ID},
+                "project": {"name": "fixture-project", "id": PROJECT_ID},
+                "package_ids": {"fixture-package": PACKAGE_ID},
+            },
         ],
         "cases": [],
     }
     baseline = {
-        "schema": 1, "fixture_only": True,
-        "provenance": {"kind": "approved-fixture", "independent_of_native": True,
-                       "complete": True,
-                       "reference": "Synthetic data, not a tenant capture or write approval"},
-        "manifests": manifests, "cases": [],
+        "schema": 1,
+        "fixture_only": True,
+        "provenance": {
+            "kind": "approved-fixture",
+            "independent_of_native": True,
+            "complete": True,
+            "reference": "Synthetic data, not a tenant capture or write approval",
+        },
+        "manifests": manifests,
+        "cases": [],
     }
 
     def add(target, addressing, method, args, expected, **extra):
@@ -119,67 +170,161 @@ def example():
         for addressing in ("name", "id"):
             common = {"name": "fixture-package"}
             exact = {**common, "version": versions[0]}
-            project = ({"id": PROJECT_ID, "name": "fixture-project", "visibility": "private"}
-                       if target else None)
-            feed = {"id": config["targets"][target]["feed"]["id"],
-                    "name": config["targets"][target]["feed"]["name"],
-                    "project": project, "description": "Synthetic feed", "deleted_date": None}
+            project = (
+                {"id": PROJECT_ID, "name": "fixture-project", "visibility": "private"}
+                if target
+                else None
+            )
+            feed = {
+                "id": config["targets"][target]["feed"]["id"],
+                "name": config["targets"][target]["feed"]["name"],
+                "project": project,
+                "description": "Synthetic feed",
+                "deleted_date": None,
+            }
             add(target, addressing, "list_feeds", {}, [feed])
-            add(target, addressing, "list_packages",
-                {"name_query": "fixture-package", "page_size": 1}, package_values)
+            add(
+                target,
+                addressing,
+                "list_packages",
+                {"name_query": "fixture-package", "page_size": 1},
+                package_values,
+            )
             add(target, addressing, "list_package_versions", common, version_values)
-            add(target, addressing, "package_version_exists", exact, True,
-                condition="existing-version")
+            add(
+                target,
+                addressing,
+                "package_version_exists",
+                exact,
+                True,
+                condition="existing-version",
+            )
             add(target, addressing, "get_package_metadata", exact, metadatas[versions[0]])
-            add(target, addressing, "get_package_versions_metadata", common, {
-                "count": 2, "value": [{"version": version, "description": metadatas[version][
-                    "description"]} for version in versions],
-            })
+            add(
+                target,
+                addressing,
+                "get_package_versions_metadata",
+                common,
+                {
+                    "count": 2,
+                    "value": [
+                        {"version": version, "description": metadatas[version]["description"]}
+                        for version in versions
+                    ],
+                },
+            )
             add(target, addressing, "list_files", exact, inventory, manifests=[0])
-            add(target, addressing, "file_exists",
-                {**exact, "relative_path": "single.bin"}, True, manifests=[0],
-                condition="existing-path")
-            add(target, addressing, "list_file_versions",
+            add(
+                target,
+                addressing,
+                "file_exists",
+                {**exact, "relative_path": "single.bin"},
+                True,
+                manifests=[0],
+                condition="existing-path",
+            )
+            add(
+                target,
+                addressing,
+                "list_file_versions",
                 {**common, "relative_path": "single.bin", "versions": versions},
                 [{"version": version, "file": inventory[1]} for version in versions],
-                manifests=[0, 1])
-            add(target, addressing, "compare_file",
+                manifests=[0, 1],
+            )
+            add(
+                target,
+                addressing,
+                "compare_file",
                 {**exact, "relative_path": "single.bin", "local_path": "sources/single.bin"},
                 {"status": "match", "metadata": metadatas[versions[0]], "file": inventory[1]},
-                manifests=[0], local_control={
-                    "size": 3, "sha256": hashlib.sha256(b"abc").hexdigest(),
-                })
+                manifests=[0],
+                local_control={
+                    "size": 3,
+                    "sha256": hashlib.sha256(b"abc").hexdigest(),
+                },
+            )
     common = {"name": "fixture-package"}
     exact = {**common, "version": versions[0]}
-    add(0, "name", "get_package_metadata", {**exact, "intent": "FetchMetadataOnly"},
-        metadatas[versions[0]])
+    add(
+        0,
+        "name",
+        "get_package_metadata",
+        {**exact, "intent": "FetchMetadataOnly"},
+        metadatas[versions[0]],
+    )
     add(0, "name", "list_files", {**common, "version": versions[1]}, inventory, manifests=[1])
-    add(0, "name", "package_version_exists", {**common, "version": "9.9.9"}, False,
-        condition="missing-version")
-    add(0, "name", "file_exists", {**exact, "relative_path": "missing.bin"}, False,
-        manifests=[0], condition="missing-path")
-    add(0, "name", "file_exists", {**common, "version": "9.9.9", "relative_path": "single.bin"},
-        False, condition="missing-version")
+    add(
+        0,
+        "name",
+        "package_version_exists",
+        {**common, "version": "9.9.9"},
+        False,
+        condition="missing-version",
+    )
+    add(
+        0,
+        "name",
+        "file_exists",
+        {**exact, "relative_path": "missing.bin"},
+        False,
+        manifests=[0],
+        condition="missing-path",
+    )
+    add(
+        0,
+        "name",
+        "file_exists",
+        {**common, "version": "9.9.9", "relative_path": "single.bin"},
+        False,
+        condition="missing-version",
+    )
     for index, path in enumerate(files):
-        add(0, "name", "compare_file", {**exact, "relative_path": path,
-                                      "local_path": "sources/" + path},
+        add(
+            0,
+            "name",
+            "compare_file",
+            {**exact, "relative_path": path, "local_path": "sources/" + path},
             {"status": "match", "metadata": metadatas[versions[0]], "file": inventory[index]},
-            manifests=[0], local_control={"size": len(sources[path]),
-                                         "sha256": hashlib.sha256(sources[path]).hexdigest()})
+            manifests=[0],
+            local_control={
+                "size": len(sources[path]),
+                "sha256": hashlib.sha256(sources[path]).hexdigest(),
+            },
+        )
     control = {"size": 3, "sha256": hashlib.sha256(b"xyz").hexdigest()}
-    add(0, "name", "compare_file",
+    add(
+        0,
+        "name",
+        "compare_file",
         {**exact, "relative_path": "single.bin", "local_path": "sources/different.bin"},
         {"status": "different", "metadata": metadatas[versions[0]], "file": inventory[1]},
-        manifests=[0], local_control=control)
-    add(0, "name", "compare_file",
+        manifests=[0],
+        local_control=control,
+    )
+    add(
+        0,
+        "name",
+        "compare_file",
         {**exact, "relative_path": "missing.bin", "local_path": "sources/different.bin"},
         {"status": "path_missing", "metadata": metadatas[versions[0]], "file": None},
-        manifests=[0], local_control=control, condition="missing-path")
-    add(0, "name", "compare_file",
-        {**common, "version": "9.9.9", "relative_path": "single.bin",
-         "local_path": "sources/different.bin"},
+        manifests=[0],
+        local_control=control,
+        condition="missing-path",
+    )
+    add(
+        0,
+        "name",
+        "compare_file",
+        {
+            **common,
+            "version": "9.9.9",
+            "relative_path": "single.bin",
+            "local_path": "sources/different.bin",
+        },
         {"status": "version_missing", "metadata": None, "file": None},
-        local_control=control, condition="missing-version")
+        local_control=control,
+        condition="missing-version",
+    )
     # Deliberately no inaccessible/deleted live fixture. The report must call
     # those gaps incomplete, rather than concealing them behind passing skips.
     return config, baseline, sources

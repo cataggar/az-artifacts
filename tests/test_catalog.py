@@ -83,16 +83,26 @@ def test_list_feeds_retains_actual_project_association(client, service):
         b"?api-version=7.1&includeUrls=false&includeDeletedUpstreams=false"
     )
     assert all(
-        request.url.params == httpx.QueryParams({
-            "api-version": "7.1", "includeUrls": "false", "includeDeletedUpstreams": "false",
-        }) for request in requests
+        request.url.params
+        == httpx.QueryParams(
+            {
+                "api-version": "7.1",
+                "includeUrls": "false",
+                "includeDeletedUpstreams": "false",
+            }
+        )
+        for request in requests
     )
 
 
 def test_complete_feed_response_can_exceed_general_response_limit(service):
-    body = json.dumps({
-        "count": 1, "value": service.feeds, "unmodeledDetails": "x" * (16 * 1024 * 1024),
-    }).encode()
+    body = json.dumps(
+        {
+            "count": 1,
+            "value": service.feeds,
+            "unmodeledDetails": "x" * (16 * 1024 * 1024),
+        }
+    ).encode()
 
     def response(request):
         if request.url.path.endswith("/Feeds"):
@@ -102,8 +112,10 @@ def test_complete_feed_response_can_exceed_general_response_limit(service):
         return service(request)
 
     with UniversalPackageClient(
-        "https://dev.azure.com/org", credential="test-pat",
-        transport=httpx.MockTransport(response), retries=0,
+        "https://dev.azure.com/org",
+        credential="test-pat",
+        transport=httpx.MockTransport(response),
+        retries=0,
     ) as client:
         assert client.list_feeds() == (Feed(FEED_ID, "feed"),)
         with pytest.raises(ProtocolError, match="size limit"):
@@ -119,8 +131,10 @@ def test_feed_response_limit_is_enforced_at_the_exact_byte_boundary(service):
         return service(request)
 
     with UniversalPackageClient(
-        "https://dev.azure.com/org", credential="test-pat",
-        transport=httpx.MockTransport(response), retries=0,
+        "https://dev.azure.com/org",
+        credential="test-pat",
+        transport=httpx.MockTransport(response),
+        retries=0,
     ) as client:
         assert client.list_feeds(max_response_bytes=len(body)) == (Feed(FEED_ID, "feed"),)
         with pytest.raises(ProtocolError, match="size limit"):
