@@ -33,9 +33,9 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - name: Install uv with ghr
-        uses: cataggar/ghr/actions/install@114926d37d3825e63bede2ccc7ce56b67eda7495
+        uses: cataggar/ghr/actions/install@a3be8c61b9d5c2bd6d38e6d067c69d70434a6db9
         with:
-          ghr-version: v0.8.0
+          ghr-version: v0.9.1
           tools: astral-sh/uv@0.12.15
         env:
           GH_TOKEN: ${{ github.token }}
